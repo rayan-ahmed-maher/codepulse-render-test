@@ -1,0 +1,12 @@
+Exit: 0
+STDOUT:
+⛅️ wrangler 4.87.0
+───────────────────
+Uploading... (0/1)
+Uploading... (1/1)
+✨ Success! Uploaded 1 files (1.32 sec)
+
+🌎 Deploying...
+✨ Deployment complete! Take a peek over at https://374f8e92.deployai-test.pages.dev
+STDERR:
+
