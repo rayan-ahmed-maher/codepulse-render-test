@@ -152,7 +152,11 @@ STRICT CHARACTER RULES:
         self.client = None
         self.model = "meta/llama-3.1-70b-instruct"
         if settings.has_nvidia:
-            self.client = OpenAI(base_url=settings.NVIDIA_BASE_URL, api_key=settings.NVIDIA_API_KEY)
+            try:
+                self.client = OpenAI(base_url=settings.NVIDIA_BASE_URL, api_key=settings.NVIDIA_API_KEY)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).warning("[NIM] OwlGuide OpenAI client init failed — AI chat disabled")
 
     def ask(self, question: str, context: str = "") -> str:
         if not self.client:

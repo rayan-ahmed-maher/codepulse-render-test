@@ -81,7 +81,7 @@ PLATFORM_MAP = {
     "vue": [
         PlatformRecommendation(
             "Netlify",
-            92,
+            84,
             "Best Vue ecosystem support",
         ),
         PlatformRecommendation(
@@ -355,7 +355,7 @@ FRAMEWORK_CONFIGS = {
 class DeploymentOrchestrator:
 
     def __init__(self):
-        self.http = httpx.AsyncClient(timeout=60)
+        self.http = httpx.AsyncClient(timeout=300)
 
     # =====================================================
     # UTILITIES
@@ -394,8 +394,6 @@ class DeploymentOrchestrator:
             if not (p / "index.html").exists():
                 # Search one level deep for index.html
                 for d in p.iterdir():
-                    if d.is_dir() and (d / (p.name if p.name != "uploads" else "") / "index.html").exists():
-                         pass # keep logic simple
                     if d.is_dir() and (d / "index.html").exists():
                         logger.info(f"[DEPLOY] Refined static path to subfolder: {d.name}/")
                         return str(d)
@@ -558,79 +556,31 @@ class DeploymentOrchestrator:
             project_name = self.sanitize_name(deploy_name_source)
         
         try:
-            if is_frontend:
-                vercel_config_path = source_project_path / "vercel.json"
-                if not vercel_config_path.exists():
+            # We upload the source files and let Vercel handle the build in the cloud.
+            # This is much more reliable than local builds.
+            deploy_path = source_project_path
+
+            if not deploy_path.is_dir():
+                return {
+                    "status": "error",
+                    "error": "INVALID_DEPLOY_PATH",
+                    "message": f"Vercel deploy directory not found: {deploy_path}",
+                }
+
+            # Framework detection for Vercel Cloud Build
+            vercel_framework = None
+            if (deploy_path / "next.config.js").exists() or (deploy_path / "next.config.mjs").exists():
+                vercel_framework = "nextjs"
+            elif (deploy_path / "vite.config.js").exists() or (deploy_path / "vite.config.ts").exists():
+                vercel_framework = "vite"
+            elif (deploy_path / "package.json").exists():
+                try:
                     import json
-
-                    with open(vercel_config_path, "w", encoding="utf-8") as f:
-                        json.dump(
-                            {
-                                "buildCommand": "npm run build",
-                                "outputDirectory": "dist",
-                                "framework": "vite",
-                            },
-                            f,
-                            indent=2,
-                        )
-                        f.write("\n")
-
-                import subprocess as _sp
-
-                def _run_npm(args):
-                    return _sp.run(
-                        args,
-                        cwd=str(source_project_path),
-                        capture_output=True,
-                        text=True,
-                        timeout=300,
-                        encoding="utf-8",
-                        errors="replace",
-                    )
-
-                install_result = await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: _run_npm(["npm", "install"]),
-                )
-
-                if install_result.returncode != 0:
-                    return {
-                        "status": "error",
-                        "error": "BUILD_FAILED",
-                        "message": "npm install failed before Vercel deployment",
-                        "raw": {
-                            "stdout": install_result.stdout[-2000:],
-                            "stderr": install_result.stderr[-2000:],
-                        },
-                    }
-
-                build_result = await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: _run_npm(["npm", "run", "build"]),
-                )
-
-                if build_result.returncode != 0:
-                    return {
-                        "status": "error",
-                        "error": "BUILD_FAILED",
-                        "message": "npm run build failed before Vercel deployment",
-                        "raw": {
-                            "stdout": build_result.stdout[-2000:],
-                            "stderr": build_result.stderr[-2000:],
-                        },
-                    }
-
-                dist_path = source_project_path / "dist"
-                if not dist_path.is_dir():
-                    return {
-                        "status": "error",
-                        "error": "BUILD_FAILED",
-                        "message": f"Build completed but dist folder is missing: {dist_path}",
-                    }
-
-                deploy_path = dist_path
-            else:
-                deploy_path = prebuilt_deploy_path or resolved_project_path
+                    pkg = json.loads((deploy_path / "package.json").read_text(encoding="utf-8"))
+                    if "react-scripts" in pkg.get("dependencies", {}) or "react-scripts" in pkg.get("devDependencies", {}):
+                        vercel_framework = "create-react-app"
+                except:
+                    pass
 
             if not deploy_path.is_dir():
                 return {
@@ -703,6 +653,8 @@ class DeploymentOrchestrator:
             for root, dirs, fnames in os.walk(deploy_path):
                 dirs[:] = [d for d in dirs if d not in excluded_dirs]
                 for fn in fnames:
+                    if fn.lower().endswith(('.pyc', '.pyo', '.pyd', '.so', '.dll', '.exe', '.obj', '.o', '.DS_Store', '.zip', '.tar', '.gz')):
+                        continue
                     fp = os.path.join(root, fn)
                     rel = os.path.relpath(fp, deploy_path).replace("\\", "/")
 
@@ -710,18 +662,8 @@ class DeploymentOrchestrator:
                     is_text_file = (
                         (content_type or "").startswith("text/")
                         or Path(fp).suffix.lower() in {
-                            ".html",
-                            ".htm",
-                            ".css",
-                            ".js",
-                            ".mjs",
-                            ".cjs",
-                            ".json",
-                            ".svg",
-                            ".xml",
-                            ".txt",
-                            ".md",
-                            ".map",
+                            ".html", ".htm", ".css", ".js", ".mjs", ".cjs",
+                            ".json", ".svg", ".xml", ".txt", ".md", ".map",
                             ".webmanifest",
                         }
                     )
@@ -747,8 +689,6 @@ class DeploymentOrchestrator:
                         "encoding": "base64",
                     })
 
-            # ── VERCEL PROJECT ISOLATION ──
-            # Use the requested platform project name so the public alias matches it.
             unique_name = project_name
             
             payload = {
@@ -757,27 +697,18 @@ class DeploymentOrchestrator:
                 "files": files,
                 "target": "production",
                 "projectSettings": {
-                    "framework": None,
-                    "installCommand": None,
-                    "buildCommand": None,
-                    "outputDirectory": ".",
-                    "rootDirectory": None,
+                    "framework": vercel_framework,
                 },
             }
 
             logger.info(
-                f"[VERCEL] Deploying "
-                f"{project_name} "
-                f"framework={framework} "
-                f"from={deploy_path}"
+                f"[VERCEL] Deploying {project_name} framework={framework} from={deploy_path}"
             )
 
             resp = await self.http.post(
                 "https://api.vercel.com/v13/deployments",
                 headers={
-                    "Authorization": (
-                        f"Bearer {settings.VERCEL_TOKEN}"
-                    ),
+                    "Authorization": f"Bearer {settings.VERCEL_TOKEN}",
                     "Content-Type": "application/json",
                 },
                 json=payload,
@@ -786,13 +717,7 @@ class DeploymentOrchestrator:
             result = resp.json()
 
             if resp.status_code >= 300:
-
-                logger.error(
-                    f"[VERCEL ERROR] "
-                    f"status={resp.status_code} "
-                    f"response={result}"
-                )
-
+                logger.error(f"[VERCEL ERROR] status={resp.status_code} response={result}")
                 return {
                     "status": "error",
                     "error": "VERCEL_PROJECT_ERROR",
@@ -820,15 +745,12 @@ class DeploymentOrchestrator:
                 "platform": "vercel",
                 "url": deploy_url,
                 "project_name": unique_name,
-                "status": "success"
+                "status": "success",
+                "deployment_id": result.get("id"),
             }
 
         except Exception as e:
-
-            logger.exception(
-                "[VERCEL DEPLOY FAILED]"
-            )
-
+            logger.exception("[VERCEL DEPLOY FAILED]")
             return {
                 "status": "error",
                 "error": "VERCEL_PROJECT_ERROR",
@@ -860,7 +782,7 @@ class DeploymentOrchestrator:
         site_name = self.sanitize_name(site_name) if site_name else ""
         
         # ── REFINE PROJECT PATH ──
-        refined_path = self._refine_project_path(project_path, "static")  # Netlify is for static/frontend
+        refined_path = self._refine_project_path(project_path, "static")
         logger.info(f"[NETLIFY] Original path: {project_path} -> Refined path: {refined_path}")
         
         logger.info(f"[NETLIFY] Deploying from {refined_path}, site_name={site_name or '(auto)'}")
@@ -871,8 +793,10 @@ class DeploymentOrchestrator:
             file_count = 0
             with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
                 for root, dirs, fnames in os.walk(refined_path):
-                    dirs[:] = [d for d in dirs if d not in {"node_modules", ".git", "__pycache__", ".next", "dist", "build"}]
+                    dirs[:] = [d for d in dirs if d not in {"node_modules", ".git", "__pycache__", ".next", "dist", "build", ".venv", "venv"}]
                     for fn in fnames:
+                        if fn.lower().endswith(('.pyc', '.pyo', '.pyd', '.so', '.dll', '.exe', '.obj', '.o', '.DS_Store', '.zip', '.tar', '.gz')):
+                            continue
                         fp = os.path.join(root, fn)
                         zf.write(fp, os.path.relpath(fp, refined_path))
                         file_count += 1
@@ -882,7 +806,6 @@ class DeploymentOrchestrator:
             headers = {"Authorization": f"Bearer {settings.NETLIFY_TOKEN}"}
             site_id = None
 
-            # If custom site name provided, create site first
             if site_name:
                 create_resp = await self.http.post(
                     "https://api.netlify.com/api/v1/sites",
@@ -892,25 +815,18 @@ class DeploymentOrchestrator:
                 if create_resp.status_code < 300:
                     site_data = create_resp.json()
                     site_id = site_data.get("id")
-                    logger.info(f"[NETLIFY] Created site: {site_name}.netlify.app (id={site_id})")
                 elif create_resp.status_code == 422:
-                    # Name already taken — try deploying anyway
-                    logger.info(f"[NETLIFY] Site name '{site_name}' already exists, deploying to it...")
-                    # Fetch existing site
                     fetch_resp = await self.http.get(
                         f"https://api.netlify.com/api/v1/sites?name={site_name}",
                         headers=headers,
                     )
                     if fetch_resp.status_code == 200:
                         sites = fetch_resp.json()
-                        if sites and len(sites) > 0:
+                        if sites:
                             site_id = sites[0].get("id")
 
-            # Deploy the ZIP
             buf.seek(0)
-            deploy_url = "https://api.netlify.com/api/v1/sites"
-            if site_id:
-                deploy_url = f"https://api.netlify.com/api/v1/sites/{site_id}/deploys"
+            deploy_url = f"https://api.netlify.com/api/v1/sites/{site_id}/deploys" if site_id else "https://api.netlify.com/api/v1/sites"
 
             resp = await self.http.post(
                 deploy_url,
@@ -918,20 +834,9 @@ class DeploymentOrchestrator:
                 content=buf.read(),
             )
 
-            # Safe JSON parsing
-            try:
-                result = resp.json()
-            except Exception:
-                logger.error(f"[NETLIFY] Non-JSON response: {resp.text[:500]}")
-                return {
-                    "status": "error",
-                    "message": f"Netlify returned non-JSON response (HTTP {resp.status_code})",
-                }
-
-            logger.info(f"[NETLIFY] Deploy response: {resp.status_code}")
+            result = resp.json()
 
             if resp.status_code < 300:
-                # ── CLEAN RESULT FORMAT ──
                 final_url = result.get("ssl_url") or result.get("url") or ""
                 return {
                     "platform": "netlify",
@@ -955,7 +860,7 @@ class DeploymentOrchestrator:
             }
 
     # =====================================================
-    # CLOUDFLARE DEPLOYMENT (wrangler pages deploy CLI)
+    # CLOUDFLARE DEPLOYMENT
     # =====================================================
 
     async def deploy_to_cloudflare(
@@ -963,29 +868,15 @@ class DeploymentOrchestrator:
         project_path: str,
         project_name: str
     ) -> dict:
-        """
-        Deploy to Cloudflare Pages using the official wrangler CLI.
-        Matches the exact behavior of manual Cloudflare dashboard upload.
-
-        On Windows, runs via `cmd /c` to bypass PowerShell execution policy.
-        Only returns a URL if the CLI exits with code 0.
-        Falls back to Netlify if Cloudflare fails.
-        """
 
         if not settings.has_cloudflare:
             return {
                 "status": "error",
-                "message": "Cloudflare credentials not set. Add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID to .env.",
+                "message": "Cloudflare credentials not set.",
             }
 
-        # ── REFINE PROJECT PATH ──
-        # Cloudflare Pages is for static sites, so we use build artifact if present
         refined_path = self._refine_project_path(project_path, "static")
-        logger.info(f"[CLOUDFLARE] Original path: {project_path} -> Refined path: {refined_path}")
-        
-        # Normalize to absolute path
         abs_path = os.path.abspath(refined_path)
-        logger.info(f"[CLOUDFLARE] Project path: {abs_path}")
 
         if not os.path.isdir(abs_path):
             return {
@@ -993,121 +884,45 @@ class DeploymentOrchestrator:
                 "message": f"Project directory not found: {abs_path}",
             }
 
-        # Check there are actual files to deploy
-        file_list = [f for f in os.listdir(abs_path) if os.path.isfile(os.path.join(abs_path, f))]
-        if not file_list:
-            return {
-                "status": "error",
-                "message": f"No files found in project directory: {abs_path}",
-            }
-        logger.info(f"[CLOUDFLARE] Files found: {file_list[:10]}")
-
         project_name = self.sanitize_name(project_name)
 
         try:
             import subprocess as _sp
             import re as _re
 
-            # Build environment with Cloudflare credentials
             env = {**os.environ}
             env["CLOUDFLARE_API_TOKEN"] = settings.CLOUDFLARE_API_TOKEN
             env["CLOUDFLARE_ACCOUNT_ID"] = settings.CLOUDFLARE_ACCOUNT_ID
+            env["WRANGLER_SEND_METRICS"] = "false"
 
-            # Step 1: Create the Pages project via REST API (wrangler deploy doesn't auto-create)
-            # This is idempotent — if project exists, API returns 409 which we ignore
             acct = settings.CLOUDFLARE_ACCOUNT_ID
-            try:
-                create_resp = await self.http.post(
-                    f"https://api.cloudflare.com/client/v4/accounts/{acct}/pages/projects",
-                    headers={
-                        "Authorization": f"Bearer {settings.CLOUDFLARE_API_TOKEN}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "name": project_name,
-                        "production_branch": "main",
-                    },
-                )
-                logger.info(f"[CLOUDFLARE] Create project '{project_name}': HTTP {create_resp.status_code}")
-                
-                if create_resp.status_code not in [200, 201, 409]:
-                    logger.error(f"[CLOUDFLARE] Project creation failed: {create_resp.text}")
-                    return {
-                        "status": "error",
-                        "error": "CLOUDFLARE_API_FAILED",
-                        "message": f"Cloudflare API failed to create project (HTTP {create_resp.status_code})"
-                    }
-            except Exception as ce:
-                logger.error(f"[CLOUDFLARE] Create project API crash: {ce}")
-                return {
-                    "status": "error",
-                    "error": "CLOUDFLARE_API_FAILED",
-                    "message": f"Cloudflare API connection failed: {str(ce)}"
-                }
+            await self.http.post(
+                f"https://api.cloudflare.com/client/v4/accounts/{acct}/pages/projects",
+                headers={
+                    "Authorization": f"Bearer {settings.CLOUDFLARE_API_TOKEN}",
+                    "Content-Type": "application/json",
+                },
+                json={"name": project_name, "production_branch": "main"},
+            )
 
-            # On Windows, use cmd /c to bypass PowerShell execution policy.
-            # For paths with spaces, we set the cwd to the project dir and use "." as the directory arg.
-            if os.name == "nt":
-                cmd = (
-                    f'cmd /c "npx wrangler pages deploy . '
-                    f'--project-name={project_name} '
-                    f'--branch=main '
-                    f'--commit-dirty=true"'
-                )
-            else:
-                cmd = (
-                    f"npx wrangler pages deploy . "
-                    f"--project-name={project_name} "
-                    f"--branch=main "
-                    f"--commit-dirty=true"
-                )
+            cmd = (
+                f'cmd /c "npx wrangler pages deploy . --project-name={project_name} --branch=main --commit-dirty=true"'
+                if os.name == "nt" else
+                f"npx wrangler pages deploy . --project-name={project_name} --branch=main --commit-dirty=true"
+            )
 
-            logger.info(f"[CLOUDFLARE] Running wrangler in cwd={abs_path}")
-            logger.info(f"[CLOUDFLARE] Command: {cmd}")
-
-            # Step 2: Proactive CLI check (Fix WinError 2)
-            import shutil as _sh
-            if not _sh.which("npm"):
-                logger.error("[CLOUDFLARE] npm/npx not found on system")
-                return {
-                    "status": "error",
-                    "error": "CLOUDFLARE_CLI_MISSING",
-                    "message": "npm/npx not found. Please install Node.js to use Cloudflare Pages deployment."
-                }
-
-            # Run the command with cwd set to the project directory
-            # Use encoding='utf-8' + errors='replace' because wrangler outputs emoji
-            # that Windows cp1252 cannot decode
             result = await asyncio.get_event_loop().run_in_executor(
                 None,
                 lambda: _sp.run(
-                    cmd,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=180,
-                    env=env,
-                    cwd=abs_path,
-                    encoding="utf-8",
-                    errors="replace",
+                    cmd, shell=True, capture_output=True, text=True,
+                    timeout=180, env=env, cwd=abs_path, encoding="utf-8", errors="replace",
                 )
             )
 
             stdout = (result.stdout or "").strip()
             stderr = (result.stderr or "").strip()
-            exit_code = result.returncode
 
-            logger.info(f"[CLOUDFLARE] Exit code: {exit_code}")
-            if stdout:
-                logger.info(f"[CLOUDFLARE] stdout:\n{stdout[:800]}")
-            if stderr:
-                logger.info(f"[CLOUDFLARE] stderr:\n{stderr[:800]}")
-
-            # ── SUCCESS: exit code 0 ──
-            if exit_code == 0:
-                # Extract the .pages.dev URL from wrangler output
-                # Wrangler prints lines like:
-                #   ✨ Deployment complete! Take a peek over at https://xxxxx.project.pages.dev
+            if result.returncode == 0:
                 deploy_url = ""
                 combined = stdout + "\n" + stderr
                 for line in combined.split("\n"):
@@ -1116,59 +931,24 @@ class DeploymentOrchestrator:
                         deploy_url = urls[0].rstrip(".")
                         break
 
-                if not deploy_url:
-                    # No fallback allowed
-                    logger.error("[CLOUDFLARE] Wrangler succeeded but no deployment URL found in output")
+                if deploy_url:
                     return {
-                        "status": "error",
-                        "error": "DEPLOYMENT_FAILED",
-                        "message": "Cloudflare succeeded but could not detect deployment URL"
+                        "platform": "cloudflare",
+                        "url": deploy_url,
+                        "project_name": project_name,
+                        "status": "success"
                     }
 
-                logger.info(f"[CLOUDFLARE] ✓ SUCCESS: {deploy_url}")
-                # ── CLEAN RESULT FORMAT ──
-                return {
-                    "platform": "cloudflare",
-                    "url": deploy_url,
-                    "project_name": project_name,
-                    "status": "success"
-                }
-
-            # ── FAILURE: non-zero exit code ──
-            error_detail = stderr or stdout or "Unknown wrangler error"
-
-            # Check for common issues
-            if "could not find" in error_detail.lower() or "is not recognized" in error_detail.lower():
-                logger.error(f"[CLOUDFLARE] Wrangler not installed: {error_detail[:200]}")
-                return {
-                    "status": "error",
-                    "error": "CLOUDFLARE_CLI_MISSING",
-                    "message": "wrangler CLI is not installed or accessible. Please run: npm install -g wrangler"
-                }
-
-            # NO FALLBACK
             return {
                 "status": "error",
-                "error": "DEPLOYMENT_FAILED",
-                "message": f"Cloudflare failed: {error_detail[:300]}",
-            }
-
-        except _sp.TimeoutExpired:
-            logger.error("[CLOUDFLARE] Timed out after 180s")
-            return {
-                "status": "error",
-                "error": "DEPLOYMENT_FAILED",
-                "message": "Cloudflare deployment timed out after 180s"
+                "message": f"Cloudflare failed: {stderr or stdout}",
             }
 
         except Exception as e:
-            logger.exception("[CLOUDFLARE] Deploy crashed")
             return {
                 "status": "error",
                 "message": f"Cloudflare deploy error: {str(e)}",
             }
-
-
 
     # =====================================================
     # POLL STATUS
@@ -1182,108 +962,40 @@ class DeploymentOrchestrator:
     ) -> dict:
 
         for _ in range(max_polls):
-
             await asyncio.sleep(3)
-
             try:
-
-                if (
-                    platform == "Vercel"
-                    and settings.has_vercel
-                ):
-
+                if platform == "Vercel":
                     resp = await self.http.get(
-                        (
-                            "https://api.vercel.com/"
-                            f"v13/deployments/"
-                            f"{deployment_id}"
-                        ),
-                        headers={
-                            "Authorization": (
-                                f"Bearer "
-                                f"{settings.VERCEL_TOKEN}"
-                            )
-                        },
+                        f"https://api.vercel.com/v13/deployments/{deployment_id}",
+                        headers={"Authorization": f"Bearer {settings.VERCEL_TOKEN}"},
                     )
-
                     data = resp.json()
+                    state = data.get("readyState", "UNKNOWN")
 
-                    state = data.get(
-                        "readyState",
-                        "UNKNOWN"
-                    )
-
-                    if state in (
-                        "READY",
-                        "ERROR",
-                        "CANCELED",
-                    ):
-
+                    if state in ("READY", "ERROR", "CANCELED"):
                         url = data.get("url", "")
-
-                        if (
-                            url
-                            and not url.startswith("http")
-                        ):
+                        if url and not url.startswith("http"):
                             url = f"https://{url}"
+                        return {"status": state.lower(), "url": url, "raw": data}
 
-                        return {
-                            "status": state.lower(),
-                            "url": url,
-                            "raw": data,
-                        }
-
-                elif (
-                    platform == "Render"
-                    and settings.RENDER_API_KEY
-                ):
-
+                elif platform == "Render":
                     resp = await self.http.get(
-                        (
-                            "https://api.render.com/v1/"
-                            f"services/{deployment_id}"
-                        ),
-                        headers={
-                            "Authorization": (
-                                "Bearer "
-                                f"{settings.RENDER_API_KEY}"
-                            )
-                        },
+                        f"https://api.render.com/v1/services/{deployment_id}",
+                        headers={"Authorization": f"Bearer {settings.RENDER_API_KEY}"},
                     )
-
                     if resp.status_code == 200:
-
                         data = resp.json()
-
-                        svc = data.get(
-                            "service",
-                            data
-                        )
-
-                        if (
-                            svc.get("suspended")
-                            == "not_suspended"
-                        ):
-
+                        svc = data.get("service", data)
+                        if svc.get("suspended") == "not_suspended":
                             return {
                                 "status": "ready",
-                                "url": (
-                                    "https://"
-                                    f"{svc.get('slug', deployment_id)}"
-                                    ".onrender.com"
-                                ),
+                                "url": f"https://{svc.get('slug', deployment_id)}.onrender.com",
                                 "raw": data,
                             }
-
             except Exception:
                 pass
 
-        return {
-            "status": "timeout",
-            "message": (
-                "Deployment polling timed out"
-            ),
-        }
+        return {"status": "timeout", "message": "Deployment polling timed out"}
 
     # =====================================================
     # RENDER DEPLOYMENT
@@ -1297,66 +1009,26 @@ class DeploymentOrchestrator:
     ) -> dict:
 
         if not settings.RENDER_API_KEY:
-            return {
-                "status": "error",
-                "message": "RENDER_API_KEY not set",
-            }
+            return {"status": "error", "message": "RENDER_API_KEY not set"}
 
         if not repo_url:
-            return {
-                "status": "error",
-                "message": (
-                    "Render requires a GitHub "
-                    "repository URL for deployment"
-                ),
-            }
+            return {"status": "error", "message": "Render requires a GitHub repo URL"}
 
         try:
-
-            env = (
-                "python"
-                if framework in (
-                    "fastapi",
-                    "flask",
-                    "django",
-                    "python",
-                )
-                else "node"
-            )
-
+            env = "python" if framework in ("fastapi", "flask", "django", "python") else "node"
             start_cmd = {
-                "fastapi": (
-                    "uvicorn main:app "
-                    "--host 0.0.0.0 "
-                    "--port $PORT"
-                ),
-
+                "fastapi": "uvicorn main:app --host 0.0.0.0 --port $PORT",
                 "flask": "python app.py",
-
-                "django": (
-                    "python manage.py "
-                    "runserver 0.0.0.0:$PORT"
-                ),
-
+                "django": "python manage.py runserver 0.0.0.0:$PORT",
                 "nodejs": "npm start",
-
                 "nextjs": "npm start",
-
-                "react": (
-                    "npx serve -s build -l $PORT"
-                ),
-            }.get(
-                framework,
-                "npm start"
-            )
+                "react": "npx serve -s build -l $PORT",
+            }.get(framework, "npm start")
 
             resp = await self.http.post(
                 "https://api.render.com/v1/services",
                 headers={
-                    "Authorization": (
-                        "Bearer "
-                        f"{settings.RENDER_API_KEY}"
-                    ),
+                    "Authorization": f"Bearer {settings.RENDER_API_KEY}",
                     "Content-Type": "application/json",
                 },
                 json={
@@ -1373,37 +1045,18 @@ class DeploymentOrchestrator:
             )
 
             result = resp.json()
-
             if resp.status_code < 300:
-
-                svc = result.get(
-                    "service",
-                    result
-                )
-
-                # ── CLEAN RESULT FORMAT ──
+                svc = result.get("service", result)
                 return {
                     "platform": "render",
                     "url": f"https://{svc.get('slug', project_name)}.onrender.com",
                     "project_name": project_name,
                     "status": "success"
                 }
-
-            return {
-                "status": "error",
-                "message": result.get(
-                    "message",
-                    str(result)
-                ),
-                "raw": result,
-            }
+            return {"status": "error", "message": result.get("message", str(result))}
 
         except Exception as e:
-
-            return {
-                "status": "error",
-                "message": str(e),
-            }
+            return {"status": "error", "message": str(e)}
 
     # =====================================================
     # VERIFY DEPLOYMENT
@@ -1416,63 +1069,23 @@ class DeploymentOrchestrator:
     ) -> dict:
 
         if not url:
-            return {
-                "verified": False,
-                "reason": "No URL provided",
-            }
+            return {"verified": False, "reason": "No URL provided"}
 
         if not url.startswith("http"):
             url = f"https://{url}"
 
-        logger.info(
-            f"[VERIFY] Checking deployment URL: {url}"
-        )
-
         for attempt in range(max_retries):
-
             try:
-
-                resp = await self.http.get(
-                    url,
-                    follow_redirects=True,
-                    timeout=10,
-                )
-
-                if resp.status_code < 500:
-
-                    logger.info(
-                        f"[VERIFY] {url} → "
-                        f"{resp.status_code} "
-                        f"(attempt {attempt + 1})"
-                    )
-
+                resp = await self.http.get(url, follow_redirects=True, timeout=10)
+                if 200 <= resp.status_code < 400:
                     return {
                         "verified": True,
                         "status_code": resp.status_code,
                         "url": str(resp.url),
                         "attempts": attempt + 1,
                     }
-
-                logger.warning(
-                    f"[VERIFY] {url} → "
-                    f"{resp.status_code} "
-                    f"(attempt {attempt + 1})"
-                )
-
-            except Exception as e:
-
-                logger.debug(
-                    f"[VERIFY] Attempt "
-                    f"{attempt + 1} failed: {e}"
-                )
-
+            except Exception:
+                pass
             await asyncio.sleep(3)
 
-        return {
-            "verified": False,
-            "reason": (
-                f"URL did not respond after "
-                f"{max_retries} attempts"
-            ),
-            "url": url,
-        }
+        return {"verified": False, "reason": "URL did not respond", "url": url}

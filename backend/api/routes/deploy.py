@@ -32,7 +32,7 @@ class DeployRequest(BaseModel):
     user_email: Optional[str] = None
     framework: Optional[str] = None
     file_count: Optional[int] = 0
-    site_name: Optional[str] = None  # Custom platform subdomain/site name supplied by the user
+    site_name: Optional[str] = None  # Custom subdomain for Netlify (e.g., "my-cafe" → my-cafe.netlify.app)
 
 
 class DeployResponse(BaseModel):

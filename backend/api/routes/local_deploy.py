@@ -204,7 +204,7 @@ def _detect_local_command(project_path: str) -> dict:
         req_text = (p / "requirements.txt").read_text(encoding="utf-8", errors="ignore").lower()
         if "fastapi" in req_text or "uvicorn" in req_text:
             return {"framework": "fastapi", "install": "pip install -r requirements.txt",
-                    "command": "uvicorn main:app --host 0.0.0.0 --port {port}",
+                    "command": "python -m uvicorn main:app --host 0.0.0.0 --port {port}",
                     "type": "backend"}
         if "flask" in req_text:
             return {"framework": "flask", "install": "pip install -r requirements.txt",
@@ -299,7 +299,7 @@ def _kill_process(pid: int):
 def _cleanup_dead_processes():
     """Remove dead processes from tracking."""
     dead = [pid for pid, entry in _local_processes.items()
-            if not _is_process_alive(entry["process"])]
+            if "process" in entry and not _is_process_alive(entry["process"])]
     for pid in dead:
         _local_processes.pop(pid, None)
         logger.info(f"[CLEANUP] Removed dead PID {pid}")
