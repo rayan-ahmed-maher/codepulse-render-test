@@ -197,9 +197,9 @@ export default function AuthPage() {
         <ThemeToggle />
       </div>
 
-      <motion.div className="login-portal" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+      <motion.div className="login-portal" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.8 }}>
         {/* Brand */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="login-brand">
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", bounce: 0.25, duration: 0.6 }} className="login-brand">
           <div className="login-brand-icon"><Rocket size={22} color="white" /></div>
           <div className="login-brand-text">
             <h1>DeployAI</h1>
@@ -208,7 +208,7 @@ export default function AuthPage() {
         </motion.div>
 
         {/* Auth Card */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="auth-card" id="auth-card">
+        <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", bounce: 0.25, duration: 0.7, delay: 0.1 }} className="auth-card" id="auth-card">
           <AnimatePresence mode="wait">
             <motion.div
               key={mode}
@@ -288,7 +288,7 @@ export default function AuthPage() {
         </motion.div>
 
         {/* Features */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="login-features">
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", bounce: 0.3, duration: 0.6, delay: 0.3 }} className="login-features">
           {[
             { label: "Real API Deploys", color: "#6366f1" },
             { label: "AI Security Scan", color: "#10b981" },

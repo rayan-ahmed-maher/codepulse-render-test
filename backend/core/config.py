@@ -16,6 +16,7 @@ class Settings:
     APP_NAME: str = "DeployAI"
     APP_VERSION: str = "2.0.0"
     DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
+    DEPLOY_ENV: str = os.getenv("DEPLOY_ENV", "development")
     CORS_ORIGINS: list = ["http://localhost:3000", "http://localhost:3001"]
 
     # ── AI ────────────────────────────────────────────────
@@ -47,6 +48,7 @@ class Settings:
     # ── Payments ──────────────────────────────────────────
     RAZORPAY_KEY_ID: str = os.getenv("RAZORPAY_KEY_ID", "")
     RAZORPAY_KEY_SECRET: str = os.getenv("RAZORPAY_KEY_SECRET", "")
+    RAZORPAY_WEBHOOK_SECRET: str = os.getenv("RAZORPAY_WEBHOOK_SECRET", "")
 
     # ── GitHub ────────────────────────────────────────────
     GITHUB_TOKEN: str = os.getenv("GITHUB_TOKEN", "")

@@ -68,3 +68,46 @@ async def send_deployment_failure(email: str, project_name: str, error_summary: 
     except Exception as e:
         logger.error(f"Resend error: {e}")
         return False
+
+
+async def send_domain_registration_email(email: str, domains: list, expiry_date: str) -> bool:
+    """Send confirmation email after successful domain registration."""
+    if not settings.has_resend:
+        logger.info(f"Resend not configured — skipping domain email to {email}")
+        return False
+    try:
+        domain_list_html = "".join(
+            f'<li style="margin:4px 0"><strong>{d}</strong></li>' for d in domains
+        )
+        import httpx
+        async with httpx.AsyncClient() as http:
+            resp = await http.post(
+                "https://api.resend.com/emails",
+                headers={"Authorization": f"Bearer {settings.RESEND_API_KEY}", "Content-Type": "application/json"},
+                json={
+                    "from": "DeployAI <noreply@deployai.app>",
+                    "to": [email],
+                    "subject": f"🌐 Domain{'s' if len(domains) > 1 else ''} registered successfully!",
+                    "html": f"""
+<div style="font-family:system-ui;max-width:500px;margin:0 auto;padding:24px">
+  <h2 style="color:#10b981">Domain Registration Complete!</h2>
+  <p>Your domain{'s have' if len(domains) > 1 else ' has'} been registered:</p>
+  <ul style="list-style:none;padding:0">{domain_list_html}</ul>
+  <p><strong>Expiry:</strong> {expiry_date[:10]}</p>
+  <h3 style="color:#6366f1;margin-top:20px">Nameserver Configuration</h3>
+  <p>Point your domain to these nameservers to connect with DeployAI:</p>
+  <div style="background:#f3f4f6;padding:12px;border-radius:8px;font-family:monospace;font-size:13px">
+    ns1.deployai.app<br>
+    ns2.deployai.app
+  </div>
+  <p style="margin-top:16px">You can also connect your domain to any deployed site from the DeployAI dashboard.</p>
+  <hr style="border-color:#e5e7eb">
+  <p style="color:#9ca3af;font-size:12px">Sent by DeployAI</p>
+</div>""",
+                },
+            )
+            return resp.status_code < 300
+    except Exception as e:
+        logger.error(f"Resend domain email error: {e}")
+        return False
+

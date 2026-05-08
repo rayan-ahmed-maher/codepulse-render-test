@@ -86,12 +86,14 @@ export default function DeployStepper({ currentStep = "analyze", status = "idle"
                     <Loader2 size={18} color={step.color} />
                   </motion.div>
                 ) : (
-                  <Icon
-                    size={18}
-                    color={
-                      isCurrent ? step.color : "var(--text-tertiary)"
-                    }
-                  />
+                  <div className={isCurrent && step.id === 'recommend' ? 'css-ripple' : isCurrent && step.id === 'deploy' ? 'engine-glow' : ''} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Icon
+                      size={18}
+                      color={
+                        isCurrent ? step.color : "var(--text-tertiary)"
+                      }
+                    />
+                  </div>
                 )}
               </div>
 
@@ -114,41 +116,31 @@ export default function DeployStepper({ currentStep = "analyze", status = "idle"
 
             {/* Connector Line */}
             {i < STEPS.length - 1 && (
-              <div
-                style={{
-                  width: 60,
-                  height: 2,
-                  marginBottom: 24,
-                  marginLeft: 4,
-                  marginRight: 4,
-                  background: isCompleted
-                    ? `linear-gradient(90deg, ${STEPS[i].color}, ${STEPS[i + 1].color})`
-                    : "rgba(255, 255, 255, 0.06)",
-                  borderRadius: 1,
-                  transition: "background 0.5s ease",
-                  position: "relative",
-                  overflow: "hidden",
-                }}
-              >
-                {isCurrent && (
-                  <motion.div
-                    initial={{ x: "-100%" }}
-                    animate={{ x: "100%" }}
-                    transition={{
-                      duration: 1.5,
-                      repeat: Infinity,
-                      ease: "easeInOut",
-                    }}
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      width: "50%",
-                      height: "100%",
-                      background: `linear-gradient(90deg, transparent, ${step.color}, transparent)`,
-                    }}
+              <div style={{ width: 60, height: 24, marginBottom: 24, display: 'flex', alignItems: 'center' }}>
+                <svg width="100%" height="2" style={{ overflow: "visible" }}>
+                  <defs>
+                    <linearGradient id={`grad-${i}`}>
+                      <stop offset="0%" stopColor={STEPS[i].color} />
+                      <stop offset="100%" stopColor={STEPS[i + 1].color} />
+                    </linearGradient>
+                  </defs>
+                  <line x1="0" y1="1" x2="100%" y2="1"
+                    stroke={isCompleted ? `url(#grad-${i})` : "rgba(255, 255, 255, 0.06)"}
+                    strokeWidth="2"
+                    strokeDasharray={isCompleted || isCurrent ? "6 6" : "0"}
+                    className={isCompleted || isCurrent ? "data-flow-line" : ""}
                   />
-                )}
+                  {isCurrent && (
+                    <motion.line x1="0" y1="1" x2="100%" y2="1"
+                      stroke={step.color}
+                      strokeWidth="2"
+                      strokeDasharray="60"
+                      initial={{ strokeDashoffset: 60 }}
+                      animate={{ strokeDashoffset: -60 }}
+                      transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
+                    />
+                  )}
+                </svg>
               </div>
             )}
           </div>

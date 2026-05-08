@@ -139,10 +139,16 @@ def generate_deploy_name_unique(
     platform: str = "Netlify",
     custom_name: str | None = None,
     max_retries: int = 3,
+    is_taken_fn=None,
 ) -> str:
     """
     Generate a unique name by appending a random suffix.
     Use this when a name collision is detected.
+
+    Args:
+        is_taken_fn: Optional callable(name) -> bool. If provided,
+                     retries until a name is not taken or retries exhausted.
+                     If not provided, returns the first generated candidate.
 
     Returns a different name on each call.
     """
@@ -151,9 +157,21 @@ def generate_deploy_name_unique(
     for attempt in range(max_retries):
         candidate = _add_uniqueness_suffix(base, platform)
         logger.info(f"[NAME] Unique attempt {attempt + 1}: '{candidate}'")
-        return candidate
 
-    # Final fallback
+        # If no availability checker is provided, return immediately
+        if is_taken_fn is None:
+            return candidate
+
+        # Check if name is taken; if not, we're done
+        try:
+            if not is_taken_fn(candidate):
+                return candidate
+            logger.info(f"[NAME] '{candidate}' is taken, retrying...")
+        except Exception as e:
+            logger.warning(f"[NAME] Availability check failed ({e}), using candidate anyway")
+            return candidate
+
+    # All retries exhausted — return the last generated candidate
     return _add_uniqueness_suffix(base, platform)
 
 

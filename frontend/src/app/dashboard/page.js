@@ -3,15 +3,36 @@
 import { useState, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Rocket, Check, ExternalLink, Search, Bell, ChevronRight, Cpu, Play, AlertTriangle, X
+  Rocket, Check, ExternalLink, Search, Bell, ChevronRight, Cpu, Play, AlertTriangle, X, Globe
 } from "lucide-react";
 import UploadVortex from "@/components/UploadVortex";
 import ComparisonMatrix from "@/components/ComparisonMatrix";
 import ReadinessGauge from "@/components/ReadinessGauge";
 import DeployStepper from "@/components/DeployStepper";
+
+function CountUp({ to, duration = 2 }) {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    let startTime;
+    let animationFrame;
+    const update = (time) => {
+      if (!startTime) startTime = time;
+      const progress = Math.min((time - startTime) / (duration * 1000), 1);
+      const easeProgress = progress === 1 ? 1 : 1 - Math.pow(2, -10 * progress);
+      setCount(Math.floor(easeProgress * to));
+      if (progress < 1) {
+        animationFrame = requestAnimationFrame(update);
+      }
+    };
+    animationFrame = requestAnimationFrame(update);
+    return () => cancelAnimationFrame(animationFrame);
+  }, [to, duration]);
+  return <>{count}</>;
+}
 import Terminal from "@/components/Terminal";
 import TemplateCards from "@/components/TemplateCards";
 import ValidationToast from "@/components/ValidationToast";
+import ThreeGlobeCenterpiece from '@/components/ThreeGlobeCenterpiece';
 import { api } from "@/lib/api";
 
 const FRAMEWORK_THEMES = {
@@ -493,37 +514,96 @@ export default function DeployPage() {
     <>
       <div className="main-header">
         <div>
-          <h1 className="text-gradient">Command Center</h1>
+          <h1 style={{ 
+            fontFamily: "var(--font-primary)", 
+            fontWeight: 800, 
+            background: "linear-gradient(135deg, #ffffff, #C77DFF)", 
+            WebkitBackgroundClip: "text", 
+            WebkitTextFillColor: "transparent" 
+          }}>Command Center</h1>
           <p style={{ fontSize: "0.82rem", color: "var(--text-tertiary)", marginTop: 4 }}>
             AI-powered deployment orchestration — real APIs only
           </p>
         </div>
-        <div className="main-header-actions">
-          <button className="btn btn-ghost btn-icon" title="Search"><Search size={18} /></button>
-          <button className="btn btn-ghost btn-icon" title="Notifications"><Bell size={18} /></button>
+        <div className="main-header-actions" style={{ display: "flex", alignItems: "center", gap: "24px" }}>
+          <div style={{ display: "flex", gap: "12px" }}>
+            <button className="btn btn-ghost btn-icon" title="Search"><Search size={20} /></button>
+            <button className="btn btn-ghost btn-icon" title="Notifications"><Bell size={20} /></button>
+          </div>
+          
+          <button className="btn-primary-glow" style={{
+            padding: "10px 20px", borderRadius: "var(--radius-md)", display: "flex", alignItems: "center", gap: "8px", cursor: "pointer"
+          }}>
+            <Rocket size={16} /> NEW DEPLOYMENT
+          </button>
+        </div>
+      </div>
+
+      <div style={{ 
+        position: "relative", 
+        width: "100%",
+        height: "clamp(320px, 55vh, 500px)", 
+        display: "flex", 
+        alignItems: "center", 
+        justifyContent: "center", 
+        margin: "0 auto 40px auto",
+        padding: "40px",
+        perspective: "1500px", 
+        overflow: "hidden",
+        background: "radial-gradient(circle at center, #1A0A3A 0%, #050510 100%)",
+        borderRadius: "var(--radius-xl)"
+      }}>
+        {/* Subtle animated hexagonal decorative elements at bottom */}
+        <div style={{ position: "absolute", bottom: "-100px", left: "50%", transform: "translateX(-50%)", width: "400px", height: "200px", opacity: 0.15, pointerEvents: "none", zIndex: 0 }}>
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ duration: 60, repeat: Infinity, ease: "linear" }}
+            style={{ width: "100%", height: "100%", border: "2px dashed #1A2A4A", borderRadius: "50%", position: "absolute" }}
+          />
+          <motion.div
+            animate={{ rotate: -360 }}
+            transition={{ duration: 80, repeat: Infinity, ease: "linear" }}
+            style={{ width: "80%", height: "80%", top: "10%", left: "10%", border: "1px solid #1A2A4A", borderRadius: "50%", position: "absolute" }}
+          />
+        </div>
+        
+        {/* Fine floating particle dots */}
+        <div style={{ position: "absolute", inset: 0, opacity: 0.3, pointerEvents: "none", zIndex: 0, backgroundImage: "radial-gradient(circle at 10px 10px, #ffffff 0.5px, transparent 1px)", backgroundSize: "40px 40px", animation: "particle-float 40s linear infinite" }} />
+        <div style={{ position: "absolute", inset: 0, opacity: 0.2, pointerEvents: "none", zIndex: 0, backgroundImage: "radial-gradient(circle at 20px 20px, #ffffff 1px, transparent 1px)", backgroundSize: "80px 80px", animation: "particle-float 60s linear infinite reverse" }} />
+
+        {/* WebGL 3D Globe Component */}
+        <ThreeGlobeCenterpiece />
+
+        <div style={{ position: "absolute", bottom: "10px", textAlign: "center", zIndex: 2 }}>
+          <div className="mono-label" style={{ color: "var(--color-cyan)" }}>ORCHESTRATOR_ACTIVE</div>
+          <div className="mono-label" style={{ fontSize: "0.55rem", marginTop: "4px" }}>READY_FOR_DEPLOYMENT</div>
         </div>
       </div>
 
       {/* Stats */}
-      <div className="stats-bar" style={{ boxShadow: `inset 0 0 60px ${theme.glow}` }}>
+      <div className="stats-bar" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "24px" }}>
         {[
-          { value: stats.total_deploys, label: "Total Deploys", color: theme.accent },
-          { value: stats.active_sites, label: "Active Sites", color: "var(--color-emerald-neon)" },
-          { value: stats.failed_deploys, label: "Failed", color: "var(--color-rose-danger)" },
+          { value: stats.total_deploys, label: "Total Deploys" },
+          { value: stats.active_sites, label: "Active Sites" },
+          { value: stats.failed_deploys, label: "Failed" },
+          { value: "99.9", label: "Latency", suffix: "ms" },
         ].map((stat, i) => (
-          <motion.div key={stat.label} className="stat-card glass-panel"
-            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 + i * 0.05 }}
-            style={{ borderTop: `2px solid ${stat.color}` }}>
-            <div className="stat-value" style={{ color: stat.color }}>{stat.value}</div>
-            <div className="stat-label">{stat.label}</div>
+          <motion.div key={stat.label} className="stat-card"
+            initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 + i * 0.15, type: "spring", stiffness: 90 }}
+            whileHover={{ y: -5, transition: { duration: 0.2 } }}>
+            <div className="mono-label">{stat.label}</div>
+            <div className="hero-number" style={{ marginTop: "12px" }}>
+              {typeof stat.value === "number" ? <CountUp end={stat.value} duration={2.5} separator="," /> : stat.value}
+              {stat.suffix && <span style={{ fontSize: "1.2rem", marginLeft: 4, color: "var(--text-secondary)" }}>{stat.suffix}</span>}
+            </div>
           </motion.div>
         ))}
       </div>
 
       {framework !== "unknown" && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-          style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 999, background: theme.glow, border: `1px solid ${theme.accent}30`, fontSize: "0.72rem", fontWeight: 700, color: theme.accent, marginBottom: 12 }}>
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="shimmer-badge"
+          style={{ position: "relative", overflow: "hidden", display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 999, background: theme.glow, border: `1px solid ${theme.accent}30`, fontSize: "0.72rem", fontWeight: 700, color: theme.accent, marginBottom: 12 }}>
           <Cpu size={12} /> {theme.label} Detected — {projectType}
         </motion.div>
       )}
@@ -543,6 +623,68 @@ export default function DeployPage() {
         {(phase === "idle" || phase === "rejected") && (
           <motion.div key="upload" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}
             style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px", marginTop: "40px" }}>
+              {/* Wave Chart Section */}
+              <motion.div className="stat-card" 
+                initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.6, duration: 0.8 }}
+                style={{ padding: "28px", display: "flex", flexDirection: "column" }}>
+                <div className="mono-label" style={{ marginBottom: "20px" }}>Network Throughput</div>
+                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", position: "relative", overflow: "hidden" }}>
+                  <svg width="100%" height="100%" viewBox="0 0 400 100" preserveAspectRatio="none">
+                    <motion.path
+                      d="M0,50 Q50,10 100,50 T200,50 T300,50 T400,50"
+                      fill="none"
+                      stroke="var(--color-orange)"
+                      strokeWidth="2.5"
+                      initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 2, ease: "easeOut", delay: 1 }}
+                      style={{ filter: "drop-shadow(0 0 8px rgba(255, 107, 53, 0.6))" }}
+                    />
+                    <motion.path
+                      d="M0,60 Q50,90 100,60 T200,60 T300,60 T400,60"
+                      fill="none"
+                      stroke="var(--color-pink)"
+                      strokeWidth="2.5"
+                      initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 2.2, ease: "easeOut", delay: 1.2 }}
+                      style={{ filter: "drop-shadow(0 0 8px rgba(255, 45, 155, 0.6))", opacity: 0.8 }}
+                    />
+                    <motion.path
+                      d="M0,40 Q50,60 100,40 T200,40 T300,40 T400,40"
+                      fill="none"
+                      stroke="var(--color-cyan)"
+                      strokeWidth="2.5"
+                      initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 2.4, ease: "easeOut", delay: 1.4 }}
+                      style={{ filter: "drop-shadow(0 0 8px rgba(0, 245, 255, 0.6))", opacity: 0.9 }}
+                    />
+                  </svg>
+                </div>
+              </motion.div>
+
+              {/* Gauge Dial Section */}
+              <motion.div className="stat-card" 
+                initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.7, duration: 0.8 }}
+                style={{ padding: "28px", display: "flex", flexDirection: "column", alignItems: "center" }}>
+                <div className="mono-label" style={{ marginBottom: "20px", alignSelf: "flex-start" }}>Cluster Health</div>
+                <div style={{ position: "relative", width: "180px", height: "180px", marginTop: "auto", marginBottom: "auto" }}>
+                  <svg width="100%" height="100%" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="8" />
+                    <motion.circle 
+                      cx="50" cy="50" r="40" fill="none" stroke="var(--color-magenta)" strokeWidth="8"
+                      strokeDasharray="251.2"
+                      initial={{ strokeDashoffset: 251.2 }}
+                      animate={{ strokeDashoffset: 25.12 }} // 90% fill
+                      transition={{ duration: 2.5, ease: "easeOut", delay: 1.5 }}
+                      style={{ filter: "drop-shadow(0 0 10px rgba(255,0,255,0.6))", transform: "rotate(-90deg)", transformOrigin: "50% 50%" }}
+                    />
+                  </svg>
+                  <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <div className="hero-number" style={{ fontSize: "2rem" }}><CountUp end={90} duration={2.5} delay={1.5} />%</div>
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+
             <UploadVortex onUpload={handleUpload} onGitHubImport={handleGitHubImport} isAnalyzing={false} />
             <div style={{ marginTop: 8 }}>
               <div className="section-label">One-Click Templates — Start Instantly</div>
@@ -557,7 +699,7 @@ export default function DeployPage() {
         {phase !== "idle" && phase !== "rejected" && (
           <motion.div className="results-area" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
             {readinessScore > 0 && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="glass-panel"
+              <motion.div layoutId="readiness-card" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-panel border-beam-card"
                 style={{ padding: 24, display: "flex", alignItems: "center", gap: 24, borderLeft: `3px solid ${theme.accent}` }}>
                 <ReadinessGauge score={readinessScore} size={100} />
                 <div>
@@ -617,8 +759,20 @@ export default function DeployPage() {
                 <div className="section-label" style={{ marginTop: 16 }}>Deploy to Platform</div>
                 <div className="results-grid">
                   {platforms.map((platform, i) => (
-                    <motion.div key={platform.name} className={`platform-card glass-panel ${platform.recommended ? "recommended" : ""}`}
-                      initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }} whileHover={{ y: -4 }}>
+                    <motion.div key={platform.name} layoutId={`platform-${platform.name}`} className={`platform-card glass-panel ${platform.recommended ? "recommended border-beam-card" : ""}`}
+                      initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} 
+                      transition={{ delay: i * 0.1, type: "spring", bounce: 0.25 }}
+                      whileHover={{ scale: 1.02, rotateX: 2, rotateY: -2, zIndex: 10 }}
+                      style={{ perspective: 1000, transformStyle: "preserve-3d" }}
+                      onMouseMove={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        e.currentTarget.style.setProperty('--mouse-x', `${e.clientX - rect.left}px`);
+                        e.currentTarget.style.setProperty('--mouse-y', `${e.clientY - rect.top}px`);
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.setProperty('--mouse-x', `-1000px`);
+                        e.currentTarget.style.setProperty('--mouse-y', `-1000px`);
+                      }}>
                       <div className="platform-card-header">
                         <div className="platform-card-icon" style={{ background: platform.bg, color: platform.color }}>{platform.icon}</div>
                         <div style={{ flex: 1 }}>
@@ -629,17 +783,31 @@ export default function DeployPage() {
                           <p style={{ fontSize: "0.72rem", color: "var(--text-tertiary)" }}>{platform.reason}</p>
                         </div>
                       </div>
-                      <div className="platform-card-body">
-                        {platform.features.map((f, fi) => (
-                          <div key={fi} className="platform-card-feature"><Check size={12} color="var(--color-emerald-neon)" /> {f}</div>
-                        ))}
+                      
+                      {/* Gradient Progress Bar */}
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                        <span className="mono-label" style={{ fontSize: "0.55rem" }}>MATCH</span>
+                        <span className="mono-label" style={{ fontSize: "0.55rem", color: "var(--color-cyan)" }}>{platform.recommended ? "98%" : "64%"}</span>
                       </div>
-                      <button className={`btn ${platform.recommended ? "btn-primary" : "btn-secondary"} btn-sm`}
-                        style={{ marginTop: 12, width: "100%", opacity: deployLocked && phase !== "deployed" ? 0.5 : 1 }}
+                      <div style={{ height: 6, borderRadius: 3, background: "rgba(255,255,255,0.05)", position: "relative", overflow: "hidden", marginBottom: 16 }}>
+                        <motion.div
+                          initial={{ width: 0 }}
+                          animate={{ width: platform.recommended ? "98%" : "64%" }}
+                          transition={{ delay: 1 + i * 0.1, duration: 1.5, ease: "easeOut" }}
+                          style={{ position: "absolute", inset: 0, background: platform.recommended ? "linear-gradient(90deg, var(--color-cyan), var(--color-purple))" : "linear-gradient(90deg, var(--color-pink), var(--color-orange))", boxShadow: "0 0 10px rgba(0, 245, 255, 0.4)" }}
+                        />
+                      </div>
+                      <button className={platform.recommended ? "btn-primary-glow btn-sm" : "btn-secondary-glow btn-sm"}
+                        style={{ padding: "8px 16px", borderRadius: "8px", width: "100%", cursor: "pointer", marginTop: 12, opacity: deployLocked && phase !== "deployed" ? 0.5 : 1 }}
                         disabled={deployLocked || phase === "deploying" || phase === "deployed"}
                         onClick={() => openDomainModal(platform.name)}>
-                        {phase === "deploying" ? "Deploying..." : phase === "deployed" ? "✓ Deployed" : `Deploy to ${platform.name}`}
-                        <ChevronRight size={14} />
+                        {phase === "deploying" ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}><Loader2 className="spin" size={14} /> DEPLOYING...</div>
+                        ) : phase === "deployed" ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}><Check size={14} /> DEPLOYED</div>
+                        ) : (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}><Rocket size={14} /> DEPLOY TO {platform.name.toUpperCase()}</div>
+                        )}
                       </button>
                     </motion.div>
                   ))}

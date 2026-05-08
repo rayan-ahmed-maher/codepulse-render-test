@@ -13,6 +13,7 @@ from services.ai_agent import NIMDiagnosticsAgent
 from services.email import send_deployment_success, send_deployment_failure
 from services.monitoring import nr_monitor
 from services.name_generator import generate_deploy_name, get_expected_url
+from services.pipeline_events import PipelineTracker
 from core.state import deployment_store
 from core.supabase_client import db
 
@@ -70,12 +71,19 @@ async def _deploy_worker_inner(tracking_id: str, req: DeployRequest, db_deploy_i
         await db.update_deployment(db_deploy_id, {"status": "deploying"})
         await db.add_build_log(db_deploy_id, "INFO", f"Starting deployment to {req.platform}...")
 
+    # ── Pipeline visualizer events ──
+    pipeline = PipelineTracker(session_id=tracking_id, tracking_id=tracking_id)
+    await pipeline.start()
+    await pipeline.emit("upload", "active")
+    await pipeline.emit("upload", "complete")
+
     result = {}
 
     fw = req.framework or "static"
     logger.info(f"[DEPLOY] Step 1: Calling {req.platform} API (framework={fw})...")
 
     # Validate API keys before attempting deploy
+    await pipeline.emit("validate", "active")
     from core.config import settings as cfg
     key_check = {
         "Vercel": cfg.has_vercel,
@@ -86,13 +94,18 @@ async def _deploy_worker_inner(tracking_id: str, req: DeployRequest, db_deploy_i
     if not key_check.get(req.platform, False):
         err = f"{req.platform} API key is not configured. Add {req.platform.upper()}_TOKEN to your .env file."
         logger.error(f"[DEPLOY] {err}")
+        await pipeline.fail("validate", err)
         await deployment_store.update(tracking_id, {"status": "FAILED", "error": err})
         if db_deploy_id:
             await db.update_deployment(db_deploy_id, {"status": "error", "error_logs": err})
             await db.add_build_log(db_deploy_id, "ERROR", err)
         return
+    await pipeline.emit("validate", "complete")
+    await pipeline.emit("analyze", "active")
+    await pipeline.emit("analyze", "complete")
 
     # ── STRICT PLATFORM RESULT ISOLATION ──
+    await pipeline.emit("build", "active")
     orchestrator = DeploymentOrchestrator()
 
     if req.platform.lower() == "vercel":
@@ -219,10 +232,13 @@ async def _deploy_worker_inner(tracking_id: str, req: DeployRequest, db_deploy_i
         return
 
     # ── LOG PLATFORM + URL ──
+    await pipeline.emit("build", "complete")
     logger.info(f"[DEPLOY] Platform: {req.platform}")
     logger.info(f"[DEPLOY] Result URL: {result.get('url', 'N/A')}")
+    await pipeline.emit("deploy", "active")
 
     if result.get("status") == "success":
+        await pipeline.emit("deploy", "complete")
         final_url = result.get("url", "")
         
         # ── VALIDATE RESPONSE BEFORE RETURN ──
@@ -243,12 +259,16 @@ async def _deploy_worker_inner(tracking_id: str, req: DeployRequest, db_deploy_i
         # STRICT: only set READY if we have a confirmed URL
         if final_url:
             # Verify the deployment URL is actually live
+            await pipeline.emit("verify", "active")
             if db_deploy_id:
                 await db.add_build_log(db_deploy_id, "INFO", f"Verifying deployment URL: {final_url}")
             
             verification = await orchestrator.verify_deployment(final_url)
             
             if verification.get("verified"):
+                await pipeline.emit("verify", "complete")
+                await pipeline.emit("live", "active")
+                await pipeline.emit("live", "complete")
                 await deployment_store.update(tracking_id, {
                     "status": "READY",
                     "url": final_url,
@@ -267,6 +287,25 @@ async def _deploy_worker_inner(tracking_id: str, req: DeployRequest, db_deploy_i
                 # New Relic: record deployment + create uptime monitor
                 await nr_monitor.record_deployment(req.project_name, final_url, req.platform)
                 await nr_monitor.create_uptime_monitor(req.project_name, final_url)
+
+                # Rollback: save deployment snapshot for version history
+                try:
+                    from api.routes.rollback import save_deployment_snapshot
+                    await save_deployment_snapshot(
+                        project_id=req.project_name,
+                        project_path=req.project_path,
+                        platform=req.platform,
+                        deployment_url=final_url,
+                        build_config={
+                            "project_path": req.project_path,
+                            "project_name": req.project_name,
+                            "framework": fw,
+                            "repo_url": locals().get("repo_url", ""),
+                        },
+                        tracking_id=tracking_id,
+                    )
+                except Exception as snap_err:
+                    logger.warning(f"[DEPLOY] Rollback snapshot save failed: {snap_err}")
             else:
                 # URL returned but not responding — mark as READY but unverified
                 await deployment_store.update(tracking_id, {
@@ -291,6 +330,7 @@ async def _deploy_worker_inner(tracking_id: str, req: DeployRequest, db_deploy_i
                 })
     else:
         error_msg = result.get("message", str(result.get("raw", "")))
+        await pipeline.fail("deploy", error_msg[:200])
         diagnosis = sre.analyze_logs(error_msg)
         await deployment_store.update(tracking_id, {
             "status": "FAILED",

@@ -37,14 +37,23 @@ export default function Terminal({ logs = [], title = "Build Output" }) {
 
   return (
     <div
-      className="glass-panel-static"
+      className="glass-panel-static terminal-window"
       style={{
+        position: "relative",
         overflow: "hidden",
         boxShadow:
-          "inset 0 2px 8px rgba(0,0,0,0.4), 0 0 20px rgba(99, 102, 241, 0.05)",
-        border: "1px solid rgba(99, 102, 241, 0.1)",
+          "inset 0 2px 8px rgba(0,0,0,0.4), 0 0 30px rgba(139, 92, 246, 0.15)",
+        border: "1px solid rgba(139, 92, 246, 0.2)",
+        backdropFilter: "blur(20px)",
+        background: "rgba(13, 11, 30, 0.7)",
       }}
     >
+      <div style={{
+        position: "absolute", inset: 0, zIndex: 0, pointerEvents: "none",
+        background: "linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06))",
+        backgroundSize: "100% 4px, 3px 100%",
+        opacity: 0.3
+      }} />
       {/* Header */}
       <div
         style={{
@@ -112,17 +121,22 @@ export default function Terminal({ logs = [], title = "Build Output" }) {
       </div>
 
       {/* Log Content */}
-      <div
+      <div 
+        className="terminal-body"
         ref={scrollRef}
-        style={{
-          padding: "12px 16px",
-          maxHeight: 300,
-          minHeight: 120,
+        style={{ 
+          background: "var(--glass-bg)", 
+          backdropFilter: "var(--glass-blur)",
+          border: "1px solid var(--glass-border)",
+          boxShadow: "var(--glass-inner-glow), 0 10px 30px rgba(0, 0, 0, 0.5)",
+          color: "var(--text-primary)", 
+          fontFamily: "var(--font-mono)", 
+          padding: "16px", 
+          height: "300px", 
           overflowY: "auto",
-          fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
-          fontSize: "0.78rem",
-          lineHeight: 1.7,
-          background: "rgba(0, 0, 0, 0.2)",
+          transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+          borderBottomLeftRadius: 12,
+          borderBottomRightRadius: 12
         }}
       >
         <AnimatePresence>
@@ -138,24 +152,36 @@ export default function Terminal({ logs = [], title = "Build Output" }) {
               Awaiting build output...
             </div>
           ) : (
-            logs.filter(l => typeof l === "string").map((line, i) => (
-              <motion.div
-                key={i}
-                initial={{ opacity: 0, x: -8 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.15, delay: i * 0.02 }}
-                style={{
-                  color: getLineColor(line),
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-all",
-                }}
-              >
-                <span style={{ color: "var(--text-tertiary)", marginRight: 8, userSelect: "none" }}>
-                  {String(i + 1).padStart(3, " ")}
-                </span>
-                {line}
-              </motion.div>
-            ))
+            logs.filter(l => typeof l === "string").map((line, i) => {
+              const color = getLineColor(line);
+              // Simple regex for URLs and absolute Linux-style paths
+              const parts = line.split(/(https?:\/\/[^\s]+|\/(?:[\w.-]+\/)*[\w.-]+)/g);
+              return (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, x: -8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.15, delay: i * 0.02 }}
+                  style={{
+                    color: color,
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-all",
+                    position: "relative",
+                    zIndex: 1,
+                  }}
+                >
+                  <span style={{ color: "var(--text-tertiary)", marginRight: 8, userSelect: "none" }}>
+                    {String(i + 1).padStart(3, " ")}
+                  </span>
+                  {parts.map((part, j) => {
+                    if (part.match(/^(https?:\/\/|\/)/)) {
+                      return <span key={j} style={{ color: "var(--color-cyan-info)", textDecoration: "underline", textUnderlineOffset: 2 }}>{part}</span>;
+                    }
+                    return part;
+                  })}
+                </motion.div>
+              );
+            })
           )}
         </AnimatePresence>
 

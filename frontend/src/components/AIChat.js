@@ -79,30 +79,45 @@ export default function AIChat({ inline = false, projectContext = "" }) {
     return (
       <>
         <motion.button
-          className="btn btn-primary btn-icon"
           onClick={() => setIsOpen(!isOpen)}
           whileHover={{ scale: 1.1 }}
           whileTap={{ scale: 0.95 }}
+          animate={{ y: [0, -5, 0] }}
+          transition={{
+            y: { duration: 3, repeat: Infinity, ease: "easeInOut" },
+            scale: { type: "spring", stiffness: 300, damping: 20 }
+          }}
           style={{
-            position: "fixed", bottom: 24, right: 24,
-            width: 52, height: 52, borderRadius: "50%",
-            zIndex: 1000, boxShadow: "0 0 30px rgba(99, 102, 241, 0.4)",
+            position: "fixed", bottom: 32, right: 32,
+            width: 60, height: 60, borderRadius: "50%",
+            zIndex: 10000, 
+            background: "linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05))",
+            backdropFilter: "blur(12px)",
+            border: "1px solid rgba(255,255,255,0.2)",
+            boxShadow: "0 0 30px rgba(118, 185, 0, 0.5), inset 0 1px 1px rgba(255,255,255,0.4)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            cursor: "pointer", color: "white"
           }}
         >
-          <MessageCircle size={22} />
+          <Bot size={28} />
         </motion.button>
         <AnimatePresence>
           {isOpen && (
             <motion.div
-              initial={{ opacity: 0, y: 20, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 20, scale: 0.95 }}
-              transition={{ type: "spring", stiffness: 200, damping: 20 }}
+              initial={{ opacity: 0, y: 40, x: 20, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, x: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 40, x: 20, scale: 0.95 }}
+              transition={{ type: "spring", stiffness: 250, damping: 25 }}
               className="glass-panel-static"
               style={{
-                position: "fixed", bottom: 88, right: 24,
-                width: 380, height: 500, zIndex: 999,
+                position: "fixed", bottom: 108, right: 32,
+                width: 400, height: 600, zIndex: 9999,
                 display: "flex", flexDirection: "column", overflow: "hidden",
+                background: "rgba(10, 14, 26, 0.65)",
+                border: "1px solid rgba(255, 255, 255, 0.15)",
+                boxShadow: "0 24px 64px rgba(0, 0, 0, 0.6), 0 0 80px rgba(118, 185, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.3)",
+                backdropFilter: "blur(20px)",
+                fontFamily: "var(--font-primary)",
               }}
             >
               <ChatContent

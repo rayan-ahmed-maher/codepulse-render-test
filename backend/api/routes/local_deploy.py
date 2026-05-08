@@ -364,8 +364,6 @@ async def deploy_local(req: LocalDeployRequest):
     if port == -1:
         return {"status": "ERROR", "error": "PORT_IN_USE", "message": "Failed to allocate a free port"}
     
-    # Track the new process BEFORE starting to ensure isolation
-    _local_processes[0] = {"project_path": project_path, "port": port}
     
     command = detection["command"].replace("{port}", str(port))
     install_cmd = detection["install"]

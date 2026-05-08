@@ -886,6 +886,34 @@ class DeploymentOrchestrator:
 
         project_name = self.sanitize_name(project_name)
 
+        # ── CLOUDFLARE CRITICAL: 25MB per-file limit — check BEFORE deploy ──
+        CF_MAX_FILE_BYTES = 25 * 1024 * 1024  # 25MB
+        skip_dirs = {"node_modules", ".git", "__pycache__", ".next", ".venv", "venv"}
+        oversized_files = []
+        for root, dirs, fnames in os.walk(abs_path):
+            dirs[:] = [d for d in dirs if d not in skip_dirs]
+            for fn in fnames:
+                fp = os.path.join(root, fn)
+                try:
+                    fsize = os.path.getsize(fp)
+                except OSError:
+                    continue
+                if fsize > CF_MAX_FILE_BYTES:
+                    rel = os.path.relpath(fp, abs_path)
+                    oversized_files.append((rel, fsize))
+
+        if oversized_files:
+            details = "; ".join(
+                f"{rel} ({sz // (1024*1024)}MB)" for rel, sz in oversized_files[:5]
+            )
+            return {
+                "status": "error",
+                "error": "FILE_TOO_LARGE",
+                "reason": f"Cloudflare Pages has a 25MB per-file limit",
+                "evidence": f"Oversized files: {details}",
+                "solution": "Compress or remove files larger than 25MB. Use external storage (S3, R2) for large assets.",
+            }
+
         try:
             import subprocess as _sp
             import re as _re

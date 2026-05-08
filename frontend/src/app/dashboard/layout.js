@@ -72,61 +72,50 @@ export default function DashboardLayout({ children }) {
   };
 
   return (
-    <div className="dashboard-container" id="dashboard">
-      <aside className="sidebar" id="sidebar">
-        <div className="sidebar-brand">
-          <div className="sidebar-brand-icon"><Rocket size={18} color="white" /></div>
-          <div>
-            <h2>DeployAI</h2>
-            <p>SaaS Platform</p>
-          </div>
+    <div className="dashboard-container" id="dashboard"
+      onMouseMove={(e) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        e.currentTarget.style.setProperty('--spotlight-x', `${e.clientX - rect.left}px`);
+        e.currentTarget.style.setProperty('--spotlight-y', `${e.clientY - rect.top}px`);
+      }}
+    >
+      <div className="particle-field" />
+      <div className="dashboard-spotlight" />
+      <aside className="sidebar mini-sidebar" id="sidebar">
+        <div className="sidebar-brand mini-brand">
+          <div className="sidebar-brand-icon holographic-glow"><Rocket size={20} color="white" /></div>
         </div>
 
-        <div className="sidebar-section">
-          <div className="sidebar-section-title">Navigation</div>
-          <nav className="sidebar-nav">
-            {NAV_ITEMS.map((item) => (
-              <button
-                key={item.path + item.label}
-                className={`nav-link ${isActive(item.path) ? "active" : ""}`}
-                onClick={() => router.push(item.path)}
-              >
-                <span className="nav-link-icon"><item.icon size={16} /></span>
-                {item.label}
-              </button>
-            ))}
-          </nav>
-        </div>
+        <nav className="sidebar-nav mini-nav">
+          {NAV_ITEMS.map((item) => (
+            <button
+              key={item.path + item.label}
+              className={`nav-link mini-link ${isActive(item.path) ? "active" : ""}`}
+              onClick={() => router.push(item.path)}
+              title={item.label}
+            >
+              <span className="nav-link-icon"><item.icon size={20} /></span>
+            </button>
+          ))}
+        </nav>
 
-        <div className="sidebar-section" style={{ marginTop: "auto" }}>
-          <div style={{ padding: "8px 12px" }}><ThemeToggle /></div>
-
+        <div className="sidebar-footer mini-footer">
+          <button className="nav-link mini-link" onClick={handleSignOut} title="Sign Out"
+            style={{ color: "var(--color-rose-danger)" }}>
+            <span className="nav-link-icon"><LogOut size={20} /></span>
+          </button>
+          
           {user && (
-            <div style={{
-              padding: "10px 12px", margin: "8px 0", borderRadius: "var(--radius-md)",
-              background: "var(--glass-bg)", fontSize: "0.75rem",
-            }}>
-              <div style={{ fontWeight: 600, color: "var(--text-primary)", marginBottom: 2 }}>
-                {user.user_metadata?.full_name || user.email?.split("@")[0] || "User"}
-              </div>
-              <div style={{ color: "var(--text-tertiary)", fontSize: "0.65rem" }}>{user.email}</div>
+            <div className="mini-user-avatar holographic-glow">
+              {user.email?.[0].toUpperCase()}
             </div>
           )}
-
-          <button className="nav-link" onClick={handleSignOut}
-            style={{ color: "var(--color-rose-danger)" }}>
-            <span className="nav-link-icon"><LogOut size={16} /></span>
-            Sign Out
-          </button>
         </div>
       </aside>
 
       <main className="main-stage" id="main-stage">{children}</main>
 
-      <aside className="ai-wing" id="ai-wing">
-        <AIChat inline={true} />
-      </aside>
-
+      <AIChat inline={false} />
       <TerminalOverlay logs={terminalLogs} isOpen={terminalOpen} onToggle={toggleTerminal} />
     </div>
   );
