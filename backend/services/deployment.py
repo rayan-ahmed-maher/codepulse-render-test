@@ -1125,19 +1125,60 @@ class DeploymentOrchestrator:
                         return {"status": state.lower(), "url": url, "raw": data}
 
                 elif platform == "Render":
+                    # Poll the service endpoint
                     resp = await self.http.get(
                         f"https://api.render.com/v1/services/{deployment_id}",
                         headers={"Authorization": f"Bearer {settings.RENDER_API_KEY}"},
                     )
+                    logger.info(f"[RENDER POLL] Status code: {resp.status_code}")
                     if resp.status_code == 200:
                         data = resp.json()
-                        svc = data.get("service", data)
-                        if svc.get("suspended") == "not_suspended":
+                        logger.info(f"[RENDER POLL] Full response: {data}")
+                        # Render returns the service object directly at top level
+                        svc = data.get("service", data) if isinstance(data, dict) else data
+                        suspended = svc.get("suspended", "unknown")
+                        slug = svc.get("slug", deployment_id)
+                        svc_status = svc.get("status", suspended)
+                        logger.info(f"[RENDER POLL] suspended={suspended}, slug={slug}, status={svc_status}")
+
+                        if suspended == "not_suspended":
                             return {
                                 "status": "ready",
-                                "url": f"https://{svc.get('slug', deployment_id)}.onrender.com",
+                                "url": f"https://{slug}.onrender.com",
                                 "raw": data,
                             }
+                    else:
+                        logger.warning(f"[RENDER POLL] Non-200 response: {resp.status_code} — {resp.text[:300]}")
+
+                    # Also poll deploys for the service to check build status
+                    try:
+                        deploys_resp = await self.http.get(
+                            f"https://api.render.com/v1/services/{deployment_id}/deploys?limit=1",
+                            headers={"Authorization": f"Bearer {settings.RENDER_API_KEY}"},
+                        )
+                        if deploys_resp.status_code == 200:
+                            deploys = deploys_resp.json()
+                            if deploys and isinstance(deploys, list) and len(deploys) > 0:
+                                deploy_obj = deploys[0].get("deploy", deploys[0])
+                                deploy_status = deploy_obj.get("status", "unknown")
+                                logger.info(f"[RENDER POLL] Latest deploy status: {deploy_status}")
+                                if deploy_status == "live":
+                                    svc_data = data if resp.status_code == 200 else {}
+                                    svc_obj = svc_data.get("service", svc_data) if isinstance(svc_data, dict) else {}
+                                    slug = svc_obj.get("slug", deployment_id)
+                                    return {
+                                        "status": "ready",
+                                        "url": f"https://{slug}.onrender.com",
+                                        "raw": svc_data,
+                                    }
+                                elif deploy_status in ("deactivated", "build_failed", "update_failed", "canceled"):
+                                    return {
+                                        "status": "error",
+                                        "message": f"Render deploy failed with status: {deploy_status}",
+                                        "raw": deploys[0],
+                                    }
+                    except Exception as poll_err:
+                        logger.warning(f"[RENDER POLL] Deploy poll error: {poll_err}")
             except Exception:
                 pass
 
@@ -1155,13 +1196,28 @@ class DeploymentOrchestrator:
     ) -> dict:
 
         if not settings.RENDER_API_KEY:
-            return {"status": "error", "message": "RENDER_API_KEY not set"}
+            return {
+                "status": "error",
+                "reason": "Render API key missing",
+                "evidence": "RENDER_API_KEY not set in environment",
+                "solution": "Add RENDER_API_KEY to your .env file. Get it from https://render.com/docs/api",
+            }
 
         if not repo_url:
-            return {"status": "error", "message": "Render requires a GitHub repo URL"}
+            return {
+                "status": "error",
+                "reason": "Render requires GitHub integration",
+                "evidence": "No GitHub repository URL provided",
+                "solution": "Push your project to GitHub first. Add GITHUB_TOKEN to .env file.",
+            }
 
         try:
             env = "python" if framework in ("fastapi", "flask", "django", "python") else "node"
+            build_cmd = {
+                "fastapi": "pip install -r requirements.txt",
+                "flask": "pip install -r requirements.txt",
+                "django": "pip install -r requirements.txt",
+            }.get(framework, "npm install && npm run build")
             start_cmd = {
                 "fastapi": "uvicorn main:app --host 0.0.0.0 --port $PORT",
                 "flask": "python app.py",
@@ -1171,38 +1227,81 @@ class DeploymentOrchestrator:
                 "react": "npx serve -s build -l $PORT",
             }.get(framework, "npm start")
 
+            sanitized_name = self.sanitize_name(project_name)
+
+            payload = {
+                "type": "web_service",
+                "name": sanitized_name,
+                "repo": repo_url,
+                "autoDeploy": "yes",
+                "branch": "main",
+                "runtime": env,
+                "buildCommand": build_cmd,
+                "startCommand": start_cmd,
+                "plan": "free",
+                "region": "oregon",
+            }
+
+            logger.info(f"[RENDER] Creating service: {sanitized_name} from {repo_url} (env={env})")
+            logger.info(f"[RENDER] Payload: {payload}")
+
             resp = await self.http.post(
                 "https://api.render.com/v1/services",
                 headers={
                     "Authorization": f"Bearer {settings.RENDER_API_KEY}",
                     "Content-Type": "application/json",
                 },
-                json={
-                    "type": "web_service",
-                    "name": project_name,
-                    "repo": repo_url,
-                    "autoDeploy": "yes",
-                    "branch": "main",
-                    "runtime": env,
-                    "startCommand": start_cmd,
-                    "plan": "free",
-                    "region": "oregon",
-                },
+                json=payload,
             )
 
-            result = resp.json()
-            if resp.status_code < 300:
+            logger.info(f"[RENDER] API response status: {resp.status_code}")
+            logger.info(f"[RENDER] API response body: {resp.text[:1000]}")
+
+            try:
+                result = resp.json()
+            except Exception:
+                result = resp.text
+
+            if resp.status_code < 300 and isinstance(result, dict):
+                # Render returns service object directly at top level
                 svc = result.get("service", result)
+                service_id = svc.get("id", "")
+                slug = svc.get("slug", sanitized_name)
+                deploy_url = f"https://{slug}.onrender.com"
+
+                logger.info(f"[RENDER] Service created: id={service_id}, slug={slug}, url={deploy_url}")
+
                 return {
                     "platform": "render",
-                    "url": f"https://{svc.get('slug', project_name)}.onrender.com",
-                    "project_name": project_name,
-                    "status": "success"
+                    "url": deploy_url,
+                    "project_name": sanitized_name,
+                    "deployment_id": service_id,
+                    "status": "success",
                 }
-            return {"status": "error", "message": result.get("message", str(result))}
+
+            # API error — extract message
+            error_msg = ""
+            if isinstance(result, dict):
+                error_msg = result.get("message", "") or result.get("error", "") or str(result)
+            else:
+                error_msg = str(result)[:500]
+
+            logger.error(f"[RENDER] API Error ({resp.status_code}): {error_msg}")
+            return {
+                "status": "error",
+                "reason": f"Render API error ({resp.status_code})",
+                "evidence": error_msg,
+                "solution": "Check the Render API error above. Ensure your API key has correct permissions.",
+            }
 
         except Exception as e:
-            return {"status": "error", "message": str(e)}
+            logger.exception(f"[RENDER] Deploy crashed: {e}")
+            return {
+                "status": "error",
+                "reason": f"Render deploy error: {type(e).__name__}",
+                "evidence": str(e),
+                "solution": "Check the error details and retry",
+            }
 
     # =====================================================
     # VERIFY DEPLOYMENT
