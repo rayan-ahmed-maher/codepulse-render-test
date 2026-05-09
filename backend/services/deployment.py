@@ -869,62 +869,127 @@ class DeploymentOrchestrator:
         project_name: str
     ) -> dict:
 
-        if not settings.has_cloudflare:
+        if not settings.CLOUDFLARE_API_TOKEN or not settings.CLOUDFLARE_ACCOUNT_ID:
             return {
                 "status": "error",
-                "message": "Cloudflare credentials not set.",
+                "error": "CLOUDFLARE_CREDENTIALS_MISSING",
+                "reason": "Cloudflare API credentials missing",
+                "evidence": "CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID not set in environment",
+                "solution": "Add your Cloudflare API token and Account ID to the .env file",
             }
 
-        refined_path = self._refine_project_path(project_path, "static")
-        abs_path = os.path.abspath(refined_path)
-
-        if not os.path.isdir(abs_path):
-            return {
-                "status": "error",
-                "message": f"Project directory not found: {abs_path}",
-            }
+        import json
+        import subprocess as _sp
+        import re as _re
+        from services.deploy_cleaner import clean_for_deploy, cleanup_deploy_copy
 
         project_name = self.sanitize_name(project_name)
 
-        # ── CLOUDFLARE CRITICAL: 25MB per-file limit — check BEFORE deploy ──
-        CF_MAX_FILE_BYTES = 25 * 1024 * 1024  # 25MB
-        skip_dirs = {"node_modules", ".git", "__pycache__", ".next", ".venv", "venv"}
-        oversized_files = []
-        for root, dirs, fnames in os.walk(abs_path):
-            dirs[:] = [d for d in dirs if d not in skip_dirs]
-            for fn in fnames:
-                fp = os.path.join(root, fn)
-                try:
-                    fsize = os.path.getsize(fp)
-                except OSError:
-                    continue
-                if fsize > CF_MAX_FILE_BYTES:
-                    rel = os.path.relpath(fp, abs_path)
-                    oversized_files.append((rel, fsize))
+        # ── STEP 1: Resolve the actual project folder ──
+        base_path = Path(project_path).resolve()
+        has_package_json = (base_path / "package.json").exists()
+        has_build_script = False
+        is_nextjs = False
 
-        if oversized_files:
-            details = "; ".join(
-                f"{rel} ({sz // (1024*1024)}MB)" for rel, sz in oversized_files[:5]
-            )
+        if (base_path / "next.config.js").exists() or (base_path / "next.config.mjs").exists():
+            is_nextjs = True
+
+        if has_package_json:
+            try:
+                pkg = json.loads((base_path / "package.json").read_text(encoding="utf-8"))
+                if "next" in pkg.get("dependencies", {}) or "next" in pkg.get("devDependencies", {}):
+                    is_nextjs = True
+                if "build" in pkg.get("scripts", {}):
+                    has_build_script = True
+            except Exception:
+                pass
+
+        # ── STEP 2: For Node.js projects, run build FIRST (on original) ──
+        if has_build_script or is_nextjs:
+            abs_path = str(base_path)
+            logger.info(f"[CLOUDFLARE] Node.js project detected. Running build in {abs_path}")
+
+            if has_build_script:
+                build_cmd = 'cmd /c "npm install && npm run build"' if os.name == "nt" else "npm install && npm run build"
+                await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: _sp.run(build_cmd, shell=True, cwd=abs_path,
+                                          capture_output=True, text=True, encoding="utf-8", errors="replace")
+                )
+
+            if is_nextjs and not (Path(abs_path) / "out").exists():
+                logger.info("[CLOUDFLARE] Next.js /out missing, running next export")
+                export_cmd = 'cmd /c "npx next export"' if os.name == "nt" else "npx next export"
+                await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: _sp.run(export_cmd, shell=True, cwd=abs_path,
+                                          capture_output=True, text=True, encoding="utf-8", errors="replace")
+                )
+
+            # Pick the best output folder
+            deploy_source = str(base_path)
+            for out_dir in ["out", "dist", "build"]:
+                candidate = Path(abs_path) / out_dir
+                if candidate.exists() and candidate.is_dir():
+                    deploy_source = str(candidate)
+                    logger.info(f"[CLOUDFLARE] Using build output: {out_dir}/")
+                    break
+        else:
+            # Static project — find the folder containing index.html
+            refined_path = self._refine_project_path(project_path, "static")
+            deploy_source = os.path.abspath(refined_path)
+
+        if not os.path.isdir(deploy_source):
             return {
                 "status": "error",
-                "error": "FILE_TOO_LARGE",
-                "reason": f"Cloudflare Pages has a 25MB per-file limit",
-                "evidence": f"Oversized files: {details}",
-                "solution": "Compress or remove files larger than 25MB. Use external storage (S3, R2) for large assets.",
+                "reason": "Project directory not found",
+                "evidence": f"Path does not exist: {deploy_source}",
+                "solution": "Check that the project was uploaded correctly",
             }
 
+        # ── STEP 3: Create a CLEAN COPY using deploy_cleaner ──
+        logger.info(f"[CLOUDFLARE] Running pre-deploy cleaner on: {deploy_source}")
         try:
-            import subprocess as _sp
-            import re as _re
+            clean_result = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: clean_for_deploy(deploy_source, "cloudflare")
+            )
+        except FileNotFoundError as e:
+            return {
+                "status": "error",
+                "reason": "Project directory not found",
+                "evidence": str(e),
+                "solution": "Check that the project was uploaded correctly",
+            }
 
-            env = {**os.environ}
+        # Log the terminal report
+        for line in clean_result.terminal_report():
+            logger.info(f"[CLOUDFLARE] {line}")
+
+        if clean_result.is_empty:
+            cleanup_deploy_copy(clean_result.clean_path)
+            return {
+                "status": "error",
+                "reason": "Project is empty after cleaning",
+                "evidence": "All files were removed by the pre-deploy cleaner",
+                "solution": "Ensure your project contains deployable files (HTML, CSS, JS, images)",
+            }
+
+        clean_path = clean_result.clean_path
+
+        # ── STEP 4: Write .wranglerignore in the clean copy ──
+        wranglerignore_content = ".next/cache\n.next/dev\nnode_modules\n.git\n__pycache__\n*.pyc\nuploads\n"
+        try:
+            (Path(clean_path) / ".wranglerignore").write_text(wranglerignore_content)
+        except Exception:
+            pass
+
+        try:
+            # ── STEP 5: Create/ensure Cloudflare Pages project via API ──
+            env = os.environ.copy()
             env["CLOUDFLARE_API_TOKEN"] = settings.CLOUDFLARE_API_TOKEN
             env["CLOUDFLARE_ACCOUNT_ID"] = settings.CLOUDFLARE_ACCOUNT_ID
             env["WRANGLER_SEND_METRICS"] = "false"
 
             acct = settings.CLOUDFLARE_ACCOUNT_ID
-            await self.http.post(
+            cf_resp = await self.http.post(
                 f"https://api.cloudflare.com/client/v4/accounts/{acct}/pages/projects",
                 headers={
                     "Authorization": f"Bearer {settings.CLOUDFLARE_API_TOKEN}",
@@ -933,22 +998,53 @@ class DeploymentOrchestrator:
                 json={"name": project_name, "production_branch": "main"},
             )
 
+            if cf_resp.status_code >= 400:
+                try:
+                    cf_data = cf_resp.json()
+                except Exception:
+                    cf_data = cf_resp.text
+
+                # Code 8000002 = project already exists — that's fine
+                is_exists = False
+                if isinstance(cf_data, dict) and "errors" in cf_data:
+                    for err in cf_data["errors"]:
+                        if err.get("code") == 8000002:
+                            is_exists = True
+
+                if not is_exists:
+                    logger.error(f"[CLOUDFLARE] API Error {cf_resp.status_code}: {cf_resp.text}")
+                    cleanup_deploy_copy(clean_path)
+                    return {
+                        "status": "error",
+                        "error": "CLOUDFLARE_API_ERROR",
+                        "reason": f"Cloudflare API Error ({cf_resp.status_code})",
+                        "evidence": cf_resp.text,
+                        "solution": "Check your Cloudflare API token permissions and Account ID",
+                    }
+
+            # ── STEP 6: Deploy the CLEAN COPY via wrangler ──
             cmd = (
                 f'cmd /c "npx wrangler pages deploy . --project-name={project_name} --branch=main --commit-dirty=true"'
                 if os.name == "nt" else
                 f"npx wrangler pages deploy . --project-name={project_name} --branch=main --commit-dirty=true"
             )
 
+            logger.info(f"[CLOUDFLARE] Running wrangler in clean copy: {clean_path}")
             result = await asyncio.get_event_loop().run_in_executor(
                 None,
                 lambda: _sp.run(
                     cmd, shell=True, capture_output=True, text=True,
-                    timeout=180, env=env, cwd=abs_path, encoding="utf-8", errors="replace",
+                    timeout=180, env=env, cwd=clean_path,
+                    encoding="utf-8", errors="replace",
                 )
             )
 
             stdout = (result.stdout or "").strip()
             stderr = (result.stderr or "").strip()
+
+            logger.info(f"[CLOUDFLARE] Wrangler exit code: {result.returncode}")
+            logger.info(f"[CLOUDFLARE] Wrangler STDOUT:\n{stdout}")
+            logger.info(f"[CLOUDFLARE] Wrangler STDERR:\n{stderr}")
 
             if result.returncode == 0:
                 deploy_url = ""
@@ -959,23 +1055,45 @@ class DeploymentOrchestrator:
                         deploy_url = urls[0].rstrip(".")
                         break
 
+                cleanup_deploy_copy(clean_path)
+
                 if deploy_url:
                     return {
                         "platform": "cloudflare",
                         "url": deploy_url,
                         "project_name": project_name,
-                        "status": "success"
+                        "status": "success",
+                        "cleaned_files": len(clean_result.removed_files),
                     }
 
+                # Wrangler succeeded but no URL found — still report success with stdout
+                return {
+                    "platform": "cloudflare",
+                    "url": "",
+                    "project_name": project_name,
+                    "status": "success",
+                    "note": "Deployed but could not extract URL from wrangler output",
+                    "wrangler_stdout": stdout[:500],
+                }
+
+            # ── Wrangler failed — return full error details ──
+            cleanup_deploy_copy(clean_path)
+            logger.error(f"[CLOUDFLARE] Wrangler failed:\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}")
             return {
                 "status": "error",
-                "message": f"Cloudflare failed: {stderr or stdout}",
+                "reason": "Wrangler deployment failed",
+                "evidence": stderr or stdout,
+                "solution": "Check the wrangler error above for exact cause",
             }
 
         except Exception as e:
+            cleanup_deploy_copy(clean_path)
+            logger.exception(f"[CLOUDFLARE] Unexpected error: {e}")
             return {
                 "status": "error",
-                "message": f"Cloudflare deploy error: {str(e)}",
+                "reason": f"Cloudflare deploy error: {type(e).__name__}",
+                "evidence": str(e),
+                "solution": "Check the error details and retry",
             }
 
     # =====================================================

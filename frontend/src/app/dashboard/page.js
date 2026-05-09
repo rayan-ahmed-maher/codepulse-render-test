@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Rocket, Check, ExternalLink, Search, Bell, ChevronRight, Cpu, Play, AlertTriangle, X, Globe
+  Rocket, Check, ExternalLink, Search, Bell, ChevronRight, Cpu, Play, AlertTriangle, X, Globe, Loader2
 } from "lucide-react";
 import UploadVortex from "@/components/UploadVortex";
 import ComparisonMatrix from "@/components/ComparisonMatrix";

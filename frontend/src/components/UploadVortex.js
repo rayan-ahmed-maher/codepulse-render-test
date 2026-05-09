@@ -25,26 +25,7 @@ export default function UploadVortex({ onUpload, onGitHubImport, isAnalyzing }) 
     setIsDragging(false);
   }, []);
 
-  const handleDrop = useCallback((e) => {
-    e.preventDefault();
-    setIsDragging(false);
-    const files = Array.from(e.dataTransfer.files);
-    if (files.length > 0) {
-      processFiles(files);
-    }
-  }, [onUpload]);
-
-  const handleFolderSelect = useCallback((e) => {
-    const files = Array.from(e.target.files);
-    if (files.length > 0) processFiles(files);
-  }, [onUpload]);
-
-  const handleZipSelect = useCallback((e) => {
-    const files = Array.from(e.target.files);
-    if (files.length > 0) processFiles(files);
-  }, [onUpload]);
-
-  const processFiles = (files) => {
+  const processFiles = useCallback((files) => {
     // Build file tree from webkitRelativePath
     const fileTree = files.map((f) => ({
       name: f.webkitRelativePath || f.name,
@@ -68,7 +49,28 @@ export default function UploadVortex({ onUpload, onGitHubImport, isAnalyzing }) 
     }, 150);
 
     onUpload?.(files, fileTree);
-  };
+  }, [onUpload]);
+
+  const handleDrop = useCallback((e) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) {
+      processFiles(files);
+    }
+  }, [processFiles]);
+
+  const handleFolderSelect = useCallback((e) => {
+    const files = Array.from(e.target.files);
+    if (files.length > 0) processFiles(files);
+  }, [processFiles]);
+
+  const handleZipSelect = useCallback((e) => {
+    const files = Array.from(e.target.files);
+    if (files.length > 0) processFiles(files);
+  }, [processFiles]);
+
+
 
   const handleGitSubmit = () => {
     if (!gitUrl.trim()) return;

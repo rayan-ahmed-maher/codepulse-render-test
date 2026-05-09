@@ -1,0 +1,1 @@
+{"status": "error", "message": "Cloudflare failed: \u001b[31mX \u001b[41;31m[\u001b[41;97mERROR\u001b[41;31m]\u001b[0m \u001b[1mError: Pages only supports files up to 25 MiB in size\u001b[0m\n\n  .next/dev/cache/turbopack/2275bd85/00000539.sst is 174 MiB in size\n\n\n🪵  Logs were written to \"C:\\Users\\Rayan Ahmed\\.wrangler\\logs\\wrangler-2026-05-09_13-39-47_942.log\""}
