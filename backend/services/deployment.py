@@ -1229,9 +1229,38 @@ class DeploymentOrchestrator:
 
             sanitized_name = self.sanitize_name(project_name)
 
+            # ── Fetch Render owner ID (required by API) ──
+            owner_id = ""
+            try:
+                owners_resp = await self.http.get(
+                    "https://api.render.com/v1/owners",
+                    headers={"Authorization": f"Bearer {settings.RENDER_API_KEY}"},
+                )
+                if owners_resp.status_code == 200:
+                    owners = owners_resp.json()
+                    if owners and isinstance(owners, list) and len(owners) > 0:
+                        owner_obj = owners[0].get("owner", owners[0])
+                        owner_id = owner_obj.get("id", "")
+                        logger.info(f"[RENDER] Owner ID: {owner_id}")
+                    else:
+                        logger.warning(f"[RENDER] No owners returned: {owners}")
+                else:
+                    logger.warning(f"[RENDER] Failed to fetch owners: {owners_resp.status_code} {owners_resp.text[:200]}")
+            except Exception as e:
+                logger.warning(f"[RENDER] Failed to fetch owner ID: {e}")
+
+            if not owner_id:
+                return {
+                    "status": "error",
+                    "reason": "Cannot determine Render workspace owner ID",
+                    "evidence": "The /v1/owners API returned no results",
+                    "solution": "Verify your RENDER_API_KEY has the correct permissions and belongs to a workspace",
+                }
+
             payload = {
                 "type": "web_service",
                 "name": sanitized_name,
+                "ownerId": owner_id,
                 "repo": repo_url,
                 "autoDeploy": "yes",
                 "branch": "main",
