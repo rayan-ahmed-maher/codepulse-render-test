@@ -1264,11 +1264,13 @@ class DeploymentOrchestrator:
                 "repo": repo_url,
                 "autoDeploy": "yes",
                 "branch": "main",
-                "runtime": env,
-                "buildCommand": build_cmd,
-                "startCommand": start_cmd,
-                "plan": "free",
-                "region": "oregon",
+                "serviceDetails": {
+                    "runtime": env,
+                    "buildCommand": build_cmd,
+                    "startCommand": start_cmd,
+                    "plan": "free",
+                    "region": "oregon",
+                },
             }
 
             logger.info(f"[RENDER] Creating service: {sanitized_name} from {repo_url} (env={env})")
