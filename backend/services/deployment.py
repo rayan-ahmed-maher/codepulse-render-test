@@ -1247,6 +1247,7 @@ class DeploymentOrchestrator:
                 "repo": repo_url,
                 "branch": "main",
                 "serviceDetails": {
+                    "runtime": env,
                     "plan": "free",
                     "region": "oregon",
                     "buildCommand": build_cmd,
