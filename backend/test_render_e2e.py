@@ -19,7 +19,45 @@ async def main():
     project_name = "codepulse-render-test"
     framework = "fastapi"
 
+    # -- PRE-DEPLOYMENT STEPS (replicated from deploy route) --
+    print("\n" + "=" * 60)
+    print("STEP 0: Pre-deployment files generation")
     print("=" * 60)
+    
+    from pathlib import Path
+    import subprocess
+    proj_path = Path(project_path)
+    
+    # 1. runtime.txt
+    runtime_path = proj_path / "runtime.txt"
+    if not runtime_path.exists():
+        runtime_path.write_text("python-3.11.0")
+        print("Generated runtime.txt")
+        
+    # 2. render.yaml
+    render_yaml_path = proj_path / "render.yaml"
+    render_yaml = f"""services:
+  - type: web
+    name: {project_name}
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+"""
+    render_yaml_path.write_text(render_yaml)
+    print("Generated render.yaml")
+    
+    # 3. requirements.txt
+    req_file = proj_path / "requirements.txt"
+    if not req_file.exists():
+        print("Missing requirements.txt, auto-generating with pipreqs...")
+        subprocess.run(f'pip install pipreqs && pipreqs "{proj_path}" --force', shell=True)
+    else:
+        print("requirements.txt already exists, keeping it.")
+
+    print("\n" + "=" * 60)
     print(f"STEP 1: Push to GitHub")
     print("=" * 60)
 

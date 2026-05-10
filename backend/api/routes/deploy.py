@@ -117,7 +117,19 @@ async def _deploy_worker_inner(tracking_id: str, req: DeployRequest, db_deploy_i
     elif req.platform.lower() == "render":
         # ── RENDER: Requires GitHub repo URL ──
         # Step 1: Auto-generate render.yaml if it doesn't exist
+        # Step 1.4: Generate render.yaml & runtime.txt if missing
         render_yaml_path = Path(req.project_path) / "render.yaml"
+        is_python = fw in ("fastapi", "flask", "django", "python")
+        
+        if is_python:
+            runtime_path = Path(req.project_path) / "runtime.txt"
+            if not runtime_path.exists():
+                try:
+                    runtime_path.write_text("python-3.11.0")
+                    logger.info(f"[DEPLOY] Generated runtime.txt")
+                except Exception:
+                    pass
+
         if not render_yaml_path.exists():
             start_cmd = {
                 "fastapi": "uvicorn main:app --host 0.0.0.0 --port $PORT",
@@ -135,9 +147,21 @@ async def _deploy_worker_inner(tracking_id: str, req: DeployRequest, db_deploy_i
                 "django": "pip install -r requirements.txt",
             }.get(fw, "npm install && npm run build")
 
-            env_type = "python" if fw in ("fastapi", "flask", "django", "python") else "node"
+            env_type = "python" if is_python else "node"
 
-            render_yaml = f"""services:
+            if is_python:
+                render_yaml = f"""services:
+  - type: web
+    name: {req.project_name}
+    runtime: python
+    buildCommand: {build_cmd}
+    startCommand: {start_cmd}
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+"""
+            else:
+                render_yaml = f"""services:
   - type: web
     name: {req.project_name}
     env: {env_type}
@@ -153,10 +177,10 @@ async def _deploy_worker_inner(tracking_id: str, req: DeployRequest, db_deploy_i
                     await db.add_build_log(db_deploy_id, "INFO", f"Auto-generated render.yaml (env={env_type})")
             except Exception as e:
                 logger.warning(f"[DEPLOY] Failed to write render.yaml: {e}")
+
         # Step 1.5: Generate .gitignore if missing
         gitignore_path = Path(req.project_path) / ".gitignore"
         if not gitignore_path.exists():
-            is_python = fw in ("fastapi", "flask", "django", "python")
             gitignore_content = "node_modules/\n.next/\ndist/\nbuild/\n.cache/\n.venv/\nvenv/\n__pycache__/\n*.pyc\n.env\n.DS_Store\n"
             if is_python:
                 gitignore_content += "*.egg-info/\n*.egg\n"
@@ -168,10 +192,17 @@ async def _deploy_worker_inner(tracking_id: str, req: DeployRequest, db_deploy_i
 
         # Step 1.6: Validate project has required files
         proj_path = Path(req.project_path)
-        is_python = fw in ("fastapi", "flask", "django", "python")
         if is_python:
-            if not (proj_path / "requirements.txt").exists():
-                err = "Missing requirements.txt — Render cannot install Python dependencies without it."
+            req_file = proj_path / "requirements.txt"
+            if not req_file.exists():
+                logger.info("[DEPLOY] Missing requirements.txt, auto-generating with pipreqs...")
+                if db_deploy_id:
+                    await db.add_build_log(db_deploy_id, "INFO", "Auto-generating requirements.txt...")
+                import subprocess
+                subprocess.run(f'pip install pipreqs && pipreqs "{proj_path}" --force', shell=True)
+
+            if not req_file.exists():
+                err = "Missing requirements.txt — Render cannot install Python dependencies without it, and auto-generation failed."
                 await deployment_store.update(tracking_id, {"status": "FAILED", "error": err})
                 if db_deploy_id:
                     await db.update_deployment(db_deploy_id, {"status": "error", "error_logs": err})
