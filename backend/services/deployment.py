@@ -1134,14 +1134,17 @@ class DeploymentOrchestrator:
                     if resp.status_code == 200:
                         data = resp.json()
                         logger.info(f"[RENDER POLL] Full response: {data}")
-                        # Render returns the service object directly at top level
-                        svc = data.get("service", data) if isinstance(data, dict) else data
-                        suspended = svc.get("suspended", "unknown")
-                        slug = svc.get("slug", deployment_id)
-                        svc_status = svc.get("status", suspended)
-                        logger.info(f"[RENDER POLL] suspended={suspended}, slug={slug}, status={svc_status}")
+                        
+                        service_obj = data.get("service", {})
+                        service_id = service_obj.get("id") or data.get("id")
+                        
+                        # Correct field extraction based on Render API structure
+                        status = data.get("deployStatus") or data.get("status") or service_obj.get("suspended")
+                        slug = service_obj.get("slug") or data.get("slug", deployment_id)
+                        
+                        logger.info(f"[RENDER POLL] service_id={service_id}, slug={slug}, status={status}")
 
-                        if suspended == "not_suspended":
+                        if status in ("live", "not_suspended", "ready"):
                             return {
                                 "status": "ready",
                                 "url": f"https://{slug}.onrender.com",
@@ -1229,48 +1232,30 @@ class DeploymentOrchestrator:
 
             sanitized_name = self.sanitize_name(project_name)
 
-            # ── Fetch Render owner ID (required by API) ──
-            owner_id = ""
-            try:
-                owners_resp = await self.http.get(
-                    "https://api.render.com/v1/owners",
-                    headers={"Authorization": f"Bearer {settings.RENDER_API_KEY}"},
-                )
-                if owners_resp.status_code == 200:
-                    owners = owners_resp.json()
-                    if owners and isinstance(owners, list) and len(owners) > 0:
-                        owner_obj = owners[0].get("owner", owners[0])
-                        owner_id = owner_obj.get("id", "")
-                        logger.info(f"[RENDER] Owner ID: {owner_id}")
-                    else:
-                        logger.warning(f"[RENDER] No owners returned: {owners}")
-                else:
-                    logger.warning(f"[RENDER] Failed to fetch owners: {owners_resp.status_code} {owners_resp.text[:200]}")
-            except Exception as e:
-                logger.warning(f"[RENDER] Failed to fetch owner ID: {e}")
-
-            if not owner_id:
+            if not settings.RENDER_OWNER_ID:
                 return {
                     "status": "error",
-                    "reason": "Cannot determine Render workspace owner ID",
-                    "evidence": "The /v1/owners API returned no results",
-                    "solution": "Verify your RENDER_API_KEY has the correct permissions and belongs to a workspace",
+                    "reason": "Render owner ID missing",
+                    "evidence": "RENDER_OWNER_ID not set in environment",
+                    "solution": "Add RENDER_OWNER_ID to your .env file",
                 }
 
             payload = {
                 "type": "web_service",
                 "name": sanitized_name,
-                "ownerId": owner_id,
+                "ownerId": settings.RENDER_OWNER_ID,
                 "repo": repo_url,
-                "autoDeploy": "yes",
                 "branch": "main",
                 "serviceDetails": {
-                    "runtime": env,
-                    "buildCommand": build_cmd,
-                    "startCommand": start_cmd,
                     "plan": "free",
                     "region": "oregon",
-                },
+                    "buildCommand": build_cmd,
+                    "startCommand": start_cmd,
+                    "envSpecificDetails": {
+                        "buildCommand": build_cmd,
+                        "startCommand": start_cmd
+                    }
+                }
             }
 
             logger.info(f"[RENDER] Creating service: {sanitized_name} from {repo_url} (env={env})")

@@ -34,6 +34,7 @@ class Settings:
     CLOUDFLARE_API_TOKEN: str = os.getenv("CLOUDFLARE_API_TOKEN", "")
     CLOUDFLARE_ACCOUNT_ID: str = os.getenv("CLOUDFLARE_ACCOUNT_ID", "")
     RENDER_API_KEY: str = os.getenv("RENDER_API_KEY", "")
+    RENDER_OWNER_ID: str = os.getenv("RENDER_OWNER_ID", "")
 
     # ── Intelligence ──────────────────────────────────────
     SERPER_API_KEY: str = os.getenv("SERPER_API_KEY", "")
